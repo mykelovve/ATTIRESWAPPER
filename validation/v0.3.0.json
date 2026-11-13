@@ -1,0 +1,62 @@
+{
+  "application": "Mykelovve Attire Swapper",
+  "version": "0.3.0",
+  "portable_zip": "Mykelovve_Attire_Swapper_v0.3_Portable.zip",
+  "portable_zip_bytes": 81830008,
+  "portable_zip_sha256": "736b505dd148799637bd285d45bf3ff6e3289e3fcc4dcec920715a1ce60c98c8",
+  "executable_sha256": "1fd95601347090291010360dde9402d353275fa17e0bff36ee28dda9ee9f014d",
+  "checks": {
+    "frozen_runtime_and_application_self_test": true,
+    "frozen_Tk_controls_and_Update_callbacks": true,
+    "source_and_frozen_snapshot_match": true,
+    "original_503_renderer_theme_modules_preserved": true,
+    "other_bundled_addon_renderer_resources_preserved": true,
+    "nested_wrapper_and_inner_folder_discovery": true,
+    "case_insensitive_MCD_MDL_discovery": true,
+    "explicit_multiple_character_and_attire_choices": true,
+    "attire_only_donor_support": true,
+    "actual_bare_MDL47_native_SDK_loads": true,
+    "frozen_actual_bare_MDL_textured_preview_19_PNGs": true,
+    "frozen_actual_Blender_MDL_input_worker_and_attire_only_donor": true,
+    "all185_workflow_source_inputs_names_sizes_and_SHA_preserved": true,
+    "actual_original_MCD_CTg_first_and_attire_header_regression": true
+  },
+  "worker": {
+    "actual_Blender_version": "4.3.2",
+    "game_target": "WWE2K26 model47",
+    "fit_clothing_exercised": false,
+    "output_is_draft": true,
+    "canonical_output_extension": ".mcd",
+    "source_input_files": 185,
+    "output_only_eyelash_repair_allowed": true
+  },
+  "viewer": {
+    "original_engine_unchanged": true,
+    "embedded_PNGs": 19,
+    "payload_valid": true,
+    "controls": {
+      "Standing": true,
+      "Arms up": true,
+      "Flex": true,
+      "Open mouth": true,
+      "Ring": true,
+      "Entrance": true
+    }
+  },
+  "limitations": [
+    "Creating swaps requires WWE2K26 model47; older game models require a separate Model Formatter port.",
+    "A complete base character must contain BaseModel and attire; a clothing-only promo pack is a donor.",
+    "Automatic results remain drafts; character-specific mesh/mask fixes and live hair/cloth YCL work remain separate.",
+    "Windows SDK/Tk/worker checks ran under Wine. Interactive native Windows visual testing was not repeated."
+  ],
+  "source_sha256": {
+    "Source/attire_swapper_gui.py": "8b10ea09f6d8a78ae7acd2d159b7d5a75285c71d423bdbc3f8eb1b564f4c1ee2",
+    "Source/fit_helpers.py": "ceeaab926ab3819994b7d529dbdd9885bb39ea7cdd0c77de5e014087c2be471d",
+    "Source/garment_fit.py": "c3ddb4fd381468378c9f6f0832f91bc9c04e989613de7a86d5d1b1279bb10336",
+    "Source/merge_helpers.py": "04425183e73ade5099709ce4b4f13a4a6b5c8269057b5ab322de820d77895eed",
+    "Source/model_layout.py": "3714168702ae0c14bc6d5198b2c5ef6c213ed10cdd0cd28c45d53e6ae7b5053b",
+    "Source/swap_job.py": "c50bcef694144557ed4b174cf81a447963cce439f7f032ff58f19608f5d27110",
+    "Source/swap_worker.py": "5ad1ea96065022de9f374e27a669a60e3d9382ae519c648441002fdab3481669",
+    "Source/ui_texture_preview.py": "b7f8f0a1b29a47d1fae67429e80b4327d2fef85fe6667a8127c149d6b90742b1"
+  }
+}
