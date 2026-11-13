@@ -6,7 +6,7 @@ Windows attire swapping and a textured 3D model viewer for WWE 2K26.
 
 Get the Windows portable ZIP from [Releases](../../releases/latest), extract it, and run the included EXE. Python is included. Viewing models does not require Blender.
 
-Current release: **v0.5.1 Preview**. v0.4 and v0.5 install it from **Update app**. Install this ZIP once by hand if you have v0.3 or earlier; those versions cannot install updates themselves.
+Current release: **v0.5.2 Preview**. v0.4 and later install it from **Update app**. Install this ZIP once by hand if you have v0.3 or earlier; those versions cannot install updates themselves.
 
 ## Updates
 
@@ -25,6 +25,10 @@ Keep `.mdl` and `.mcd` filenames intact. v0.3 recognizes both formats and valida
 ## Viewer
 
 Drag to rotate, right-drag to pan, and scroll to zoom. Ring, Entrance, Standing, Arms up, Flex and Open mouth use the original Formatter viewer engine. Base, donor and result previews are available from the sidebar.
+
+## v0.5.2 no skin through clothing
+
+Swaps now include body hide-masks (HPL), so the body no longer shows through the new clothing. When the donor pack's body matches the base, the donor attire's own masks are used; otherwise the masks are generated from what the donor clothing covers, separately for ring and entrance gear, and trimmed back one vertex at garment edges so no holes open. Only the new attire carries the masks: BaseModel files and the base hair are still shipped untouched.
 
 ## v0.5.1 base hair kept exactly
 
