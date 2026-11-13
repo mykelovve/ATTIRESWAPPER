@@ -1,4 +1,4 @@
-# Handoff from Claude — v0.5.1 released (2026-11-13)
+# Handoff from Claude — v0.5.2 released (2026-11-13)
 
 The owner asked Claude to resume work, fix the clothing auto-fit, fix missing hair, and publish both so the in-app updater delivers them. That is done. This file says what shipped, how it was built and checked, and what is left.
 
@@ -23,19 +23,21 @@ The base model's hair stays **exactly** the same: geometry, textures and materia
   - Live: v0.4 and v0.5 both see 0.5.1, and the public download equals the tested EXE.
   - The owner's test swaps are in `Documents/Mykelovve Attire Swaps/*-v051`.
 
-## NEXT TASK (in progress): skin shows through clothing
-Seen in the owner's Swerve swap (base `Downloads\Swerve '25 By JOEMASHUPS\8_Jalen_Brunson - 2K26`, donor Swerve '26 promo): the hair is correct, but blotchy skin patches show through the top, pants and arm.
-- **Cause.** The new attire has no body hide-masks (HPL). The worker imports with `auto_apply_hpl=False`, strips the `HPL_` groups, and the scene has no masks to embed. The game and viewer draw the full body under tight clothes.
-- **Tried (branch `claude/body-hide-masks`, not released).** Apply the donor attire's own HPL (`hpl_roundtrip.extract_hpl_from_mcd` + `apply_hpl_to_basemodel`) when the donor BaseModel's M_Body/M_Head vertex counts equal the base's. It correctly skips both test donors:
-  - Swerve '26 (2) has a different body (7483 vs 12727).
-  - The matching Swerve '26 promo has no HPL at all.
-  - So donor masks alone will not fix this.
-- **Do next.** Generate `HPL_Ring` / `HPL_Entrance` vertex groups on the base M_Body (and M_Head when covered) from donor clothing coverage, in the scene reference copy only:
-  - Mask a body vertex when a ray along its outward normal hits ring-visible donor clothing (not hair, not `S_` cages) within about 2–3 cm.
-  - Use entrance-visible clothing for `HPL_Entrance`; `appearance_flag` 129 means entrance only.
-  - The exporter's HPL round trip (`interface_save.py`: `scene_has_hpl_edits` → `generate_hpl_substream`) embeds the groups automatically.
-  - Keep the BaseModel files byte for byte and the base hair untouched.
-  - Verify in the viewer, which reads hidden skin like the game, then release v0.5.2 with `tools/repackage_exe.py` (base v0.5.1 EXE, previous tag `v0.5.1`).
+## v0.5.2 released: body hide-masks (skin no longer shows through clothing)
+- [v0.5.2](https://github.com/mykelovve/ATTIRESWAPPER/releases/tag/v0.5.2) is the latest release.
+  - Tag commit: `5491ae76546bee91a8d0e3433c1f02b0309d124b`.
+  - ZIP SHA-256 `326d3838c8d08836e7e6a05a7b53bde91427a2a26783cb06a68dac7fa781277b`.
+  - Built from the v0.5.1 EXE with `tools/repackage_exe.py`.
+- **Cause.** The new attire had no HPL body masks, so the body drew through tight clothes.
+- **Fix** (`_body_hide_masks` in `swap_worker.py`):
+  - Uses the donor attire's own HPL when the donor BaseModel's M_Body/M_Head vertex counts equal the base's.
+  - Otherwise generates `HPL_Ring` / `HPL_Entrance` groups on the base body reference: a vertex is masked when the clothing is within 2.5 cm along its normal or 4 cm behind it, using ring- or entrance-visible clothing (`appearance_flag` bit 1 = entrance only, bit 2 = ring only), with one-ring erosion at edges.
+  - The exporter embeds the masks; BaseModel files and base hair stay untouched.
+- **Checked:**
+  - Swerve (JOEMASHUPS '25 base + '26 promo): 192 KB HPL embedded; the preview shows the top and pants solid.
+  - Speedball (GRANDSLAM base): masks generated, hair change 0.0, `.ycl` copied.
+  - Real v0.5.1 → v0.5.2 in-app update passed; the live updater sees 0.5.2 from v0.4 and v0.5.1.
+- **Next:** in-game check. If edges show skin in poses, tune the 2.5/4 cm distances or the erosion. A few small specks remain on the Swerve pants in the preview.
 
 ## Speedball (Mike Bailey): use the GRANDSLAM base
 - **Which base works.** The owner's working Speedball port, with hair and body fine in game, is `discovery\DISCOVERY CHARACTERS UPDATEDE 2\Characters\1169_Mike_Bailey_GRANDSLAM`.

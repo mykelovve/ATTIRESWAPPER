@@ -1,6 +1,6 @@
 # Claude handoff — Attire Swapper v0.4
 
-> **Superseded 2026-11-13:** the owner resumed work and v0.5.1 is now released. Read `docs/HANDOFF_TO_CHATGPT.md` for the current state; the release policy below still applies.
+> **Superseded 2026-11-13:** the owner resumed work and v0.5.2 is now released. Read `docs/HANDOFF_TO_CHATGPT.md` for the current state; the release policy below still applies.
 
 ## Current instruction
 Further model repairs and new feature work are paused at the owner's request. Complete release/documentation bookkeeping only. Resume other work only when the owner asks.

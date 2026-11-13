@@ -1,0 +1,24 @@
+{
+  "application": "Mykelovve Attire Swapper",
+  "version": "0.5.2",
+  "update_repository": "mykelovve/ATTIRESWAPPER",
+  "changes": [
+    "Body hide-masks (HPL) are embedded in the new attire: the donor's own HPL when its BaseModel body/head vertex counts match the base, otherwise generated from donor clothing coverage (ray along body normal: clothing within 2.5 cm outside or 4 cm behind), per ring/entrance, eroded one vertex ring.",
+    "Masks live only in the new attire; BaseModel files byte-identical; base hair, hair materials and .ycl untouched.",
+    "APP_VERSION 0.5.2."
+  ],
+  "environment": "Native Windows 11 (owner's PC), Blender 4.4 and 5.2, Python 3.14",
+  "checks": {
+    "build_integrity": "repackaged from the v0.5.1 EXE; only attire_swapper_gui and swap_worker replaced; all entries verified; bundled worker equals the tested worker.",
+    "self_test": "success, version 0.5.2, 19 valid PNGs.",
+    "swerve_joemashups_base": "Masks generated (M_Body ring 3843 / entrance 5624 vertices, M_Head 39 / 77); 192,192-byte HPL block embedded; preview shows top and pants solid with no skin patches; base preserved; hair change 0.0.",
+    "speedball_grandslam_base": "Donor body differs, masks generated (M_Body 2178 / 2956); hair change 0.0; base .ycl copied.",
+    "in_app_update_native_windows": "Real v0.5.1 -> v0.5.2 update: backup, replace, relaunch health 0.5.2, no rollback."
+  },
+  "limitations": [
+    "Not tested in WWE 2K26 by Claude.",
+    "Generated masks are a rest-pose coverage estimate; a few small specks can remain, and skin at garment edges may show in extreme poses.",
+    "A copied base .ycl also describes the base attire's clothing cages.",
+    "The EXE is not code-signed."
+  ]
+}
