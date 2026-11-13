@@ -105,6 +105,8 @@ def main():
         "gh", "api", "--method", "PATCH", release_endpoint,
         "-F", "draft=false", "-F", "prerelease=false", "-f", "make_latest=true",
     ))
+    # Publishing replaces the temporary draft URLs with versioned URLs.
+    uploaded = {asset["name"]: asset for asset in release["assets"]}
     result = {
         "tag": tag, "source_commit": source_commit,
         "artifact_commit": artifact_commit, "zip_sha256": expected_sha,
