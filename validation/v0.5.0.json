@@ -1,0 +1,33 @@
+{
+  "application": "Mykelovve Attire Swapper",
+  "version": "0.5.0",
+  "update_repository": "mykelovve/ATTIRESWAPPER",
+  "changes": [
+    "Clothing auto-fit bounds every vertex to the garment's travel limit and repairs garments partially instead of rejecting them.",
+    "Partial fits are reported per garment (applied_partial) with remaining penetration in the swap log.",
+    "Interior items such as mouthguards are detected and left unchanged.",
+    "Shape-keyed garments are fitted; every key receives the Basis offset.",
+    "APP_VERSION 0.5. Updater, preview, model loading and the rest of the worker are unchanged from v0.4."
+  ],
+  "environment": "Native Windows 11 (owner's PC), Blender 4.4 and 5.2, Python 3.14",
+  "checks": {
+    "build_integrity": "All 1191 archive entries verified: only the four changed modules differ from v0.4; every bundled helper equals the release source; compiled modules equal compile() of the release source. The method reproduces v0.4's compiled code objects exactly from v0.4 source.",
+    "self_test": "--self-test success: version 0.5, Tk 8.6, renderer, worker and add-on present, six viewer controls, 19 valid PNGs.",
+    "full_swaps_blender_4_4": {
+      "swerve_same_character": "success in 33 s; base model byte-identical; M_Bottoms/M_Shoes/M_Tops applied_partial (134/2/51 vertices remain, deepest 12.1/4.9/13.7 cm); M_Jacket and both M_U_Acce applied (shape keys preserved).",
+      "bailey_cross_pack": "success in 32 s; base model byte-identical; M_Mouthguard interior_item_unchanged; kickpads/kneepads applied_partial; 10 garments applied."
+    },
+    "source_files_unchanged": "Swerve, Bailey base and Bailey donor folders have the same files and sizes before and after; the worker re-verified source model SHA256.",
+    "previews": "v0.5 --build-preview of both results: payload valid, no missing or failed pictures (13 and 21 PNGs).",
+    "visual_comparison": "Same viewer, same framing: the original unswapped Swerve mod and the v0.4 swap both show bare belly, thigh gaps and a shin hole; the v0.5 swap covers the belly and shin and most of the hips. Two upper-thigh patches and two small hem patches remain.",
+    "fit_regression_test": "tests/blender_fit_test.py: 12/12 on Blender 4.4 and 5.2; fails on v0.4 code.",
+    "real_drafts_harness": "Worker _fit on four saved drafts (Blender 5.2), in memory: Swerve pants 1064->134, top 584->51, shoes 44->2, U_Acce 24->0; Bailey kickpads 50->3; body unchanged.",
+    "in_app_update_native_windows": "Real v0.4 installer helper updated a running v0.4 copy to v0.5: verified backup kept, atomic replace, v0.5 relaunch wrote matching health (version 0.5), success with no rollback."
+  },
+  "limitations": [
+    "Not tested in WWE 2K26 by Claude; inspect swaps in game.",
+    "Some deep penetration remains on tight garments; it is reported in the swap log.",
+    "Cross-character rigs with donor-only bones are not yet handled (see docs/HANDOFF_TO_CHATGPT.md).",
+    "The EXE is not code-signed."
+  ]
+}

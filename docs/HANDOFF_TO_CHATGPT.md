@@ -1,58 +1,76 @@
-# Handoff from Claude — bounded auto-fit (2026-11-13)
+# Handoff from Claude — v0.5.0 released (2026-11-13)
 
-The owner asked Claude to resume work on the clothing auto-fit after the v0.4 handoff. This file says what was done, what was checked, and what is left.
+The owner asked Claude to resume work, fix the clothing auto-fit, and publish it so the in-app updater delivers it. That is done. This file says what shipped, how it was built and checked, and what is left.
 
-## Where the work is
-- Branch: `claude/auto-fit-bounded` (based on `main` at `4cc6b9d`, the v0.4.0 handoff commit).
-- **Not merged into main and not released.** `main`'s `Source/` still matches the sealed v0.4.0 build, as the release policy requires. A v0.5 build must be produced from this branch using the private Formatter runtime, native SDK and model add-on, then released per the release policy in `docs/CLAUDE_HANDOFF.md`.
-- Changed: `Source/fit_helpers.py`, `Source/garment_fit.py`, `Source/swap_worker.py`. Added: `tests/blender_fit_test.py`.
-- The swap worker, folder discovery, GUI, updater and preview code are otherwise unchanged.
+## Released
+- [v0.5.0](https://github.com/mykelovve/ATTIRESWAPPER/releases/tag/v0.5.0) is the latest stable release.
+  - Tag commit: `c43930636878559881ae1e0b293df0c2fdd8a8e9`.
+  - `Mykelovve_Attire_Swapper_v0.5_Portable.zip`: 81,696,655 bytes, SHA-256 `8693cbd1c48306f26ac990e84537fda5164e7a212109a9babbc673db09777fe3`.
+  - EXE SHA-256 `b69dde45917df2359fd9ccfacaaa7ebefdbaf28ce9fec6e78e5cf5dc7c5439a9`.
+- Published through the existing **Publish portable release** workflow. The public download, GitHub asset digest and `SHA256SUMS.txt` agree, and the temporary `release-input/v0.5.0` branch was deleted.
+- `Source/` on the tag matches the build. `main` after the tag adds only docs, `tools/` and `validation/v0.5.0.json`.
 
-## The problem (from the owner's real v0.3/v0.4 swaps)
-Auto-fit rejected 8 of 19 garments, including the large ones: Swerve pants, top and shoes, plus Bailey's kickpads, both kneepads and mouthguard. Rejected garments were exported unfitted, so body skin showed through the pants and top in the 3D preview. There were two causes:
-1. **Runaway surface pass.** The edge/face correction pass pushed vertices that started outside the body 20–106 cm.
-2. **All-or-nothing limit.** A few stray vertices (hidden caps or tucks 5–11 cm inside) vetoed the whole garment.
+## What changed in v0.5 (Source)
+- **`fit_helpers.py`:**
+  - No vertex travels more than `max_displacement`. Vertices that would need more are tapered, or left alone if they are 2× the limit deep, along with the surface samples touching them.
+  - Each garment is repaired partially instead of being rejected, and reports `fully_resolved`, `unresolved_inside_vertices`, `tapered_vertices` and `deep_interior_vertices`.
+  - Interior items (≥80% inside, median depth beyond the limit) are left unchanged.
+  - `strict=True` keeps the old all-or-nothing behaviour.
+- **`garment_fit.py`:** shape-keyed garments are fitted, with every key offset like Basis. Cap handling is unchanged.
+- **`swap_worker.py`:** fit statuses are now `applied`, `applied_partial` (with a log warning) or `interior_item_unchanged`.
+- **`attire_swapper_gui.py`:** `APP_VERSION = "0.5"` only.
+- **`tests/blender_fit_test.py`:** a synthetic regression test that needs no game files.
 
-Garments with shape keys were also refused outright (Swerve `M_U_Acce`), and the mouthguard (inside the head by design) was treated as a failure.
+## How the EXE was built (repeatable without the private build machine)
+`tools/repackage_exe.py` rebuilds a release EXE from the previous sealed release EXE plus git source. `tools/pyi_archive.py` reads and writes the PyInstaller 6 onefile archive and PYZ. Python 3.14 is required, to match the bundled `python314.dll`.
 
-## What changed
-- **Bounded travel.** No vertex moves more than `max_displacement` (2 cm default; 3.7 cm for jackets and tights).
-  - Vertices that need more are tapered (moved a shrinking amount).
-  - Vertices deeper than 2× the limit are left alone, along with any surface samples touching them.
-- **Partial fits.** The rest of each garment is repaired, and each garment reports `fully_resolved`, `unresolved_inside_vertices`, `tapered_vertices` and `deep_interior_vertices`. The worker status is `applied`, `applied_partial` (with a warning naming the garment and its deepest remaining penetration) or `interior_item_unchanged`. `strict=True` restores the old all-or-nothing behaviour.
-- **Interior items.** A garment that is ≥80% inside the body, with median depth beyond the limit, is reported as an interior item and left unchanged (for example the mouthguard).
-- **Shape keys.** Each fitted vertex's offset is applied to every shape key, so key shapes are unchanged relative to Basis.
-- **Unchanged guarantees.** Proposals are still computed before writing, the body is still verified unchanged, and the cap handling in `garment_fit` is kept.
+- It replaces only the `Source/*.py` modules that changed, both as bundled `assets\helpers\*.py` and as compiled PYZ modules.
+- Every other entry (runtime, renderer, WWE2K_MDL add-on, `gmf_gui` entry script) stays byte-identical.
+- It verifies every entry after writing.
+- The method reproduces v0.4's compiled code objects exactly from v0.4 source.
 
-## Checks run
-- **Real drafts (owner's machine, Blender 5.2).** The worker's `_fit` was run in memory on the four saved drafts in `Documents/Mykelovve Attire Swaps`. Nothing was saved and the body was verified unchanged. Vertices inside the body, before → after:
-  - Swerve pants: 1064 → 134
-  - Swerve top: 584 → 51
-  - Swerve shoes: 44 → 2
-  - Swerve `M_U_Acce` (shape keys): 24 → 0, with key drift 0
-  - Bailey kickpads: 50 → 3
-  - Bailey kneepads: 3 → 3 (only 9–10 vertices needed moving)
-  - Mouthguard: now `interior_item_unchanged`
-- **Regression test.** `tests/blender_fit_test.py` passes all 12 checks on Blender 4.4 and 5.2 and fails on the v0.4 code. Run it with:
-  `blender --background --factory-startup --python tests/blender_fit_test.py -- Source`
+Command used:
+`py -3.14 -I tools/repackage_exe.py <repo> c439306... <v0.4 exe> Mykelovve_Attire_Swapper_v0.5.exe v0.4.0`
 
-## Not verified
-- **Full worker export.** The complete Blender export (MCD write, materials, textures) was not rerun with the new code; only `_fit` was exercised. Run one full swap on Blender 4.3/4.4 before releasing.
-- **In-game result.** Not tested in WWE 2K26.
+For v0.6, use the v0.5 EXE as the base and `v0.5.0` as the previous tag.
 
-## What is left (in priority order)
-1. **Build, verify and release v0.5** from this branch per the release policy. Run one full swap first and inspect the result in the 3D viewer and in game.
-2. **Remaining skin show-through.**
-   - The Swerve pants and top still have 134 and 51 vertices inside, 2–13 cm deep: geometry a 2 cm limit cannot reach.
-   - The attire's HPL (body hide-mask) blocks: the output MCD keeps the same number of `HPL!` blocks as the source, but whether their contents still hide the right body polygons was not checked. If the Formatter preview does not apply HPL at all, the preview will show skin that the game hides, so check in game before chasing this further.
-   - When base and donor are the same character, the clothes were authored against that same body. Consider fitting only penetration that is new relative to the donor's own body, rather than absolute penetration.
-3. **Cross-character swaps.** The export rig is a copy of the base attire rig, so bones that exist only in the donor (coat tails, accessories) are missing, and `validate_export_bundle` / `_copy_attachments` will stop the job. Not yet reproduced; both test swaps were same-character.
-4. **Blender version.** `discover_blender()` picks the newest install. On the owner's machine that is 5.2, although the UI says 4.3/4.4 and 4.4 is installed. Prefer a tested version and warn otherwise.
-5. **Missing installer entry.** The updater launches the EXE with `--apply-update`, but nothing in `Source/` handles that argument. The build record lists a `gmf_gui` entry script outside `Source/`; publish it or document it.
-6. **GUI.**
+The EXE entry script `gmf_gui` (not in `Source/`) handles `--apply-update` (it calls `app_updater.apply_update`) and the Tk self-tests.
+
+## Checks run (native Windows 11; details in `validation/v0.5.0.json`)
+- **Build integrity:** all 1,191 archive entries verified.
+- **`--self-test`:** passed with version 0.5 and 19 valid PNGs.
+- **Full swaps** in Blender 4.4 using the add-on and worker extracted from the v0.5 EXE:
+  - Swerve (same character) and Bailey (different donor pack) both succeeded.
+  - Base models are byte-identical, and source folders have unchanged files and sizes.
+  - Results are in the owner's `Documents/Mykelovve Attire Swaps/*-v05` folders.
+- **Previews:** v0.5 previews of both results are valid, with no missing pictures.
+- **Real in-app update v0.4 → v0.5:** the v0.4 installer helper replaced a running v0.4 copy, kept a verified backup, relaunched v0.5, and passed the health check with no rollback.
+- **Live update check:** v0.4 sees v0.5.0, downloads and verifies it, and gets the exact tested EXE. v0.5 sees no update.
+- **Regression test:** `tests/blender_fit_test.py` passed 12/12 on Blender 4.4 and 5.2.
+
+## Visual finding (owner's Swerve screenshot)
+In the same viewer, the **original unswapped Swerve mod** shows a bare belly, thigh gaps and a shin hole, exactly like the owner's v0.4 swap. That skin comes from the source mod, not from the swap.
+
+The v0.5 swap covers the belly and shin, and most of the hips. Two upper-thigh patches and two small hem patches remain. These are the 134 pants and 51 top vertices 2–13 cm inside the body, which the 2 cm limit cannot reach.
+
+The viewer states it reads hidden skin the way the game does. The result has not been checked in game.
+
+## What is left (priority order)
+1. **In-game check** of the `-v05` Swerve and Bailey swaps in WWE 2K26.
+2. **Remaining deep penetration on tight garments.**
+   - Option A: a per-garment larger limit with smooth falloff.
+   - Option B: when base and donor are the same character, keep the mod's authored offset rather than forcing clearance.
+   - Option C: write HPL hide-masks for body polygons fully covered by donor clothing. The exporter runs with `export_hpl=False`, and the worker strips `HPL_` groups from the base reference.
+3. **Cross-character swaps:** the export rig is a copy of the base attire rig, so donor-only bones (coat tails, accessories) are missing. `validate_export_bundle` and `_copy_attachments` will stop the job. Not yet reproduced.
+4. **Blender version:** `discover_blender()` picks the newest install (5.2 on the owner's PC). Prefer 4.3/4.4 and warn about untested versions.
+5. **GUI:**
    - No Cancel button for a running swap.
    - The status keeps saying "draft created" after later failures.
    - Staging and temp folders accumulate.
-7. **Owner screenshots not addressed.** Speedball's robe shows green in game but black in the preview, and hair pokes through the headband. These are preview shading and hair fit; `START_HERE.txt` already lists them as not established fixes.
+6. **Speedball screenshots** (robe green in game but black in the preview; hair through the headband): preview shading and hair fit. Not addressed.
+7. **Owner's PC:** a leftover hidden folder `.Swerve Strickland '26 - Promo Attire_AttireSwap_20261112-200410-fixedfit.staging-75439ead08` in `Documents/Mykelovve Attire Swaps`, from an interrupted test run, is safe to delete.
+
+## Release policy
+Unchanged; see `docs/CLAUDE_HANDOFF.md`. Ship every update with matching `Source/`, a tag on that source commit, the portable ZIP in GitHub Releases, an agreeing `SHA256SUMS.txt`, and a verified public download.
 
 No game files, model assets or personal reports are included in this repository.
