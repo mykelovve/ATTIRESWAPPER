@@ -199,8 +199,13 @@ def _donor_body_counts(job):
     folder = next((p for p in job['donor_character'].iterdir()
                    if p.is_dir() and p.name.casefold() == 'basemodel'), None)
     if folder is None:
+        job['_donor_base_model_identity'] = None
         return None
-    donor_base = _import_model(one_model(folder, base=True), 'donor_base_model')
+    model_path = one_model(folder, base=True)
+    # HPL uses pre-dedup native indices. Equal Blender counts or even equal
+    # Blender geometry cannot establish that the native remap is identical.
+    job['_donor_base_model_identity'] = {'sha256': sha256(model_path), 'path': str(model_path)}
+    donor_base = _import_model(model_path, 'donor_base_model')
     counts = _body_counts(donor_base['meshes'])
     for obj in donor_base['objects']:
         bpy.data.objects.remove(obj, do_unlink=True)
@@ -210,21 +215,35 @@ def _donor_body_counts(job):
     return counts
 
 
+
 def _apply_donor_hpl(job, base, donor_counts, warnings):
     """Hide the base body under the donor clothing with the donor's own HPL masks.
 
-    HPL stores body vertex indices, so the masks are applied only when the
-    donor pack's body and head have the same vertex counts as the base. The
+    HPL stores pre-dedup native body vertex indices, so masks are reused only
+    for the exact same BaseModel file, including its native vertex remap. The
     groups are added to the scene reference copy; the BaseModel files are still
     copied byte for byte, and the exporter embeds the masks in the new attire.
     """
     from WWE2K_MDL.Serialize.hpl_roundtrip import extract_hpl_from_mcd, apply_hpl_to_basemodel
     base_counts = _body_counts(base['meshes'])
     result = {'applied': False, 'base_counts': base_counts, 'donor_counts': donor_counts}
+    donor_identity = job.get('_donor_base_model_identity') or {}
+    base_path = job.get('base_model')
+    base_hash = sha256(base_path) if base_path is not None else None
+    donor_hash = donor_identity.get('sha256')
+    if donor_identity.get('path'):
+        donor_hash = sha256(donor_identity['path'])
+    result['body_identity_check'] = {'method': 'exact_base_model_sha256',
+                                     'base_sha256': base_hash,
+                                     'donor_sha256': donor_hash}
     if donor_counts is None:
         result['reason'] = 'The attire donor has no BaseModel to confirm its body matches the base'
     elif set(base_counts) != {'m_body', 'm_head'} or donor_counts != base_counts:
         result['reason'] = 'The donor body/head vertex counts differ from the base'
+    elif (not base_hash or donor_hash != base_hash
+          or donor_hash != donor_identity.get('sha256')):
+        result['reason'] = ('The donor BaseModel is not byte-identical to the base; '
+                            'matching vertex counts cannot prove native mask indices match')
     else:
         hpl = extract_hpl_from_mcd(str(job['donor_attire']))
         if not hpl or len(hpl) <= 32:
@@ -235,6 +254,7 @@ def _apply_donor_hpl(job, base, donor_counts, warnings):
             if not ok:
                 result['reason'] = message
     return result
+
 
 
 def _clothing_visibility(obj):
@@ -280,48 +300,158 @@ def _view_directions(n, tangent, other):
             yield (n * math.cos(tilt) + side * math.sin(tilt)).normalized()
 
 
-def _generate_hpl(base, clothing, outward=2.5, inward=4.0, poke=15.0, island_limit=400):
+def _mask_material_reason(material, image_cache):
+    """Return why a material cannot conservatively hide underlying skin.
+
+    This reads the actual opacity graph rather than treating a gear shader
+    number as proof of opacity. Alpha-textured faces are included only when
+    the complete loaded image alpha is opaque; complex/unknown graphs are
+    skipped instead of interpreting transparent pixels as solid clothing.
+    """
+    if material is None:
+        return 'missing_material'
+    if material.get('vc_2k26_alpha', False) or clean_mesh(material.name).casefold().endswith('_alpha'):
+        return 'explicit_alpha_material'
+    if not material.use_nodes or material.node_tree is None:
+        if material.get('vc_2k26_color_map_hash') is not None:
+            return 'unloaded_color_image_opacity'
+        return None if material.diffuse_color[3] >= .9999 else 'transparent_material'
+    outputs = [n for n in material.node_tree.nodes
+               if n.type == 'OUTPUT_MATERIAL' and getattr(n, 'is_active_output', True)]
+    if len(outputs) != 1:
+        return 'unverified_surface_graph'
+    surface = outputs[0].inputs.get('Surface')
+    if surface is None or len(surface.links) != 1:
+        return 'unverified_surface_graph'
+    shader = surface.links[0].from_node
+    if shader.type == 'BSDF_TRANSPARENT':
+        return 'transparent_shader'
+    if shader.type != 'BSDF_PRINCIPLED':
+        return 'unverified_surface_graph'
+    color = shader.inputs.get('Base Color')
+    if (material.get('vc_2k26_color_map_hash') is not None
+            and (color is None or not color.is_linked)):
+        return 'unloaded_color_image_opacity'
+    alpha = shader.inputs.get('Alpha')
+    if alpha is None:
+        return 'unverified_alpha'
+    if not alpha.is_linked:
+        return None if alpha.default_value >= .9999 else 'transparent_material'
+    if len(alpha.links) != 1:
+        return 'unverified_alpha_graph'
+    link = alpha.links[0]
+    if link.from_node.type != 'TEX_IMAGE' or link.from_socket.name != 'Alpha':
+        return 'unverified_alpha_graph'
+    image = link.from_node.image
+    if image is None or not image.has_data:
+        return 'unloaded_alpha_image'
+    if image.alpha_mode == 'NONE' or image.channels < 4:
+        return None
+    key = image.as_pointer()
+    if key not in image_cache:
+        pixels = image.pixels
+        # 4096x4096 RGBA is the largest image scanned automatically. Slice in
+        # bounded chunks so an opaque map does not allocate another full image.
+        if len(pixels) > 64 * 1024 * 1024:
+            image_cache[key] = 'alpha_image_exceeds_scan_limit'
+        elif not len(pixels) or image.channels != 4:
+            image_cache[key] = 'unverified_alpha_image'
+        else:
+            reason = None
+            for start in range(0, len(pixels), 65536):
+                values = pixels[start:min(start + 65536, len(pixels))]
+                if any(not value >= .9999 for value in values[3::4]):
+                    reason = 'transparent_alpha_image'
+                    break
+            image_cache[key] = reason
+    return image_cache[key]
+
+
+
+def _generate_hpl(base, clothing, outward=2.5, inward=4.0, poke=15.0, *,
+                  interior_meshes=(), diagnostics=None, _trees_out=None):
     """Hide base body vertices that the donor clothing covers, per ring/entrance.
 
     A body vertex is covered when the clothing surface lies within ``outward``
-    cm along its outward normal, or within ``inward`` cm behind it (skin that
-    pokes through tight clothing), or when the nearest clothing surface within
-    ``poke`` cm faces the same way and the vertex lies outside it (skin poking
-    out through clothing that sits deep inside the body). The mask is eroded by one vertex ring so
-    garment edges never open holes in the body. Groups go on the scene
-    reference copy only; the BaseModel files are still copied byte for byte.
+    cm along its outward normal, or within ``inward`` cm behind it. A mask
+    vertex also requires every incident body triangle to pass edge, centroid
+    and interior coverage probes, because HPL can hide a whole face when one
+    vertex is masked. This is conservative sampled rest-pose coverage, not a
+    proof for every pixel or animated pose. Groups modify only the scene copy.
     """
     from mathutils.bvhtree import BVHTree
+    diagnostics = {} if diagnostics is None else diagnostics
+    diagnostics.update(scope='sampled_rest_pose_triangle_coverage', skipped_objects=[],
+                       skipped_material_faces=[], eligible_clothing_triangles=0,
+                       limits=['Finite face probes do not prove every pixel or animated pose.',
+                               'Transparent or unverified opacity faces do not hide skin.'])
+    interior_meshes = {str(name).casefold() for name in interior_meshes}
+    image_cache, material_cache = {}, {}
     sets = {'HPL_Ring': [], 'HPL_Entrance': []}
     for obj in clothing:
-        if clean_mesh(obj.data.name).startswith('S_') or not obj.data.polygons:
+        name = clean_mesh(obj.data.name)
+        if name.casefold().startswith('s_') or not obj.data.polygons:
             continue
+        if ('mouthguard' in name.casefold() or 'mouth_guard' in name.casefold()
+                or name.casefold() in interior_meshes):
+            diagnostics['skipped_objects'].append({'mesh': name, 'reason': 'interior_accessory'})
+            continue
+        eligible, skipped = [], {}
+        obj.data.calc_loop_triangles()
+        for triangle in obj.data.loop_triangles:
+            index = obj.data.polygons[triangle.polygon_index].material_index
+            material = obj.data.materials[index] if index < len(obj.data.materials) else None
+            key = material.as_pointer() if material is not None else None
+            if key not in material_cache:
+                material_cache[key] = _mask_material_reason(material, image_cache)
+            reason = material_cache[key]
+            if reason:
+                skipped[reason] = skipped.get(reason, 0) + 1
+            else:
+                eligible.append(tuple(triangle.vertices))
+        diagnostics['skipped_material_faces'].extend(
+            {'mesh': name, 'reason': reason, 'triangles': count}
+            for reason, count in skipped.items())
+        if not eligible:
+            continue
+        diagnostics['eligible_clothing_triangles'] += len(eligible)
         ring, entrance = _clothing_visibility(obj)
         if ring:
-            sets['HPL_Ring'].append(obj)
+            sets['HPL_Ring'].append((obj, eligible))
         if entrance:
-            sets['HPL_Entrance'].append(obj)
+            sets['HPL_Entrance'].append((obj, eligible))
     trees = {}
     for name, objs in sets.items():
         verts, tris = [], []
-        for obj in objs:
+        for obj, eligible in objs:
             offset = len(verts)
             verts.extend(obj.matrix_world @ v.co for v in obj.data.vertices)
-            obj.data.calc_loop_triangles()
-            tris.extend(tuple(offset + i for i in t.vertices) for t in obj.data.loop_triangles)
+            tris.extend(tuple(offset + i for i in triangle) for triangle in eligible)
         trees[name] = BVHTree.FromPolygons(verts, tris, all_triangles=True) if tris else None
     bodies = [o for o in base['meshes'] if clean_mesh(o.data.name).casefold() in ('m_body', 'm_head')]
-    occ_verts, occ_tris = [], []
-    for obj in bodies:
-        offset = len(occ_verts)
-        occ_verts.extend(obj.matrix_world @ v.co for v in obj.data.vertices)
-        obj.data.calc_loop_triangles()
-        occ_tris.extend(tuple(offset + i for i in t.vertices) for t in obj.data.loop_triangles)
-    occluder = BVHTree.FromPolygons(occ_verts, occ_tris, all_triangles=True)
+    body_vertices, body_triangles = [], []
+    for body in bodies:
+        offset = len(body_vertices)
+        body_vertices.extend(body.matrix_world @ v.co for v in body.data.vertices)
+        body.data.calc_loop_triangles()
+        body_triangles.extend(tuple(offset + i for i in triangle.vertices)
+                              for triangle in body.data.loop_triangles)
+    occluder = (BVHTree.FromPolygons(body_vertices, body_triangles, all_triangles=True)
+                if body_triangles else None)
+    if _trees_out is not None:
+        _trees_out.update(trees)
+        _trees_out['body'] = occluder
     result = {}
     for body in bodies:
         mesh = body.data
-        is_body = clean_mesh(mesh.name).casefold() == 'm_body'  # never guess on the face
+        is_body = clean_mesh(mesh.name).casefold() == 'm_body'
+        # An authored-mask import can leave groups populated, including after
+        # a partial import failure. Start both scenes empty so excluded or
+        # uncovered skin cannot retain a stale hidden-vertex assignment.
+        for name in sets:
+            group = body.vertex_groups.get(name)
+            if group is not None:
+                group.remove(list(range(len(mesh.vertices))))
         normal_matrix = body.matrix_world.to_3x3().inverted().transposed()
         points = [body.matrix_world @ v.co for v in mesh.vertices]
         normals = [(normal_matrix @ v.normal).normalized() for v in mesh.vertices]
@@ -330,101 +460,60 @@ def _generate_hpl(base, clothing, outward=2.5, inward=4.0, poke=15.0, island_lim
             a, b = edge.vertices
             neighbors[a].append(b)
             neighbors[b].append(a)
-        counts, checks = {}, {}
+        mesh.calc_loop_triangles()
+        triangles = [tuple(triangle.vertices) for triangle in mesh.loop_triangles]
+        incident = [[] for _ in mesh.vertices]
+        for index, triangle in enumerate(triangles):
+            for vertex in triangle:
+                incident[vertex].append(index)
+        counts = {}
+        face_checks = {}
         for name, tree in trees.items():
             if tree is None:
                 continue
-            covered, poked = set(), set()
+            def covered_point(point, normal):
+                if normal.length < .5:
+                    return False
+                normal = normal.normalized()
+                hit = tree.ray_cast(point + normal * .01, normal, outward)[0]
+                return (hit is not None
+                        or _fabric_behind(tree, occluder, point, normal, inward)
+                        or (is_body and _skin_poking_out(tree, occluder, point, normal, poke)))
+            covered = set()
             for i, (p, n) in enumerate(zip(points, normals)):
-                if n.length < .5:
-                    continue
-                hit = tree.ray_cast(p + n * .01, n, outward)[0]
-                if hit is not None:
-                    # Double-check from four angles: a collar or wrap fringe that
-                    # stands off the skin can be seen past, so it does not count.
-                    tangent = n.orthogonal().normalized()
-                    other = n.cross(tangent)
-                    angled = 0
-                    for side in (tangent, -tangent, other, -other):
-                        direction = (n + side).normalized()
-                        if tree.ray_cast(p + n * .01, direction, outward * 2)[0] is not None:
-                            angled += 1
-                    if angled < 3:
-                        hit = None
-                if hit is None:
-                    if _fabric_behind(tree, occluder, p, n, inward) or (
-                            is_body and _skin_poking_out(tree, occluder, p, n, poke)):
-                        hit = p
-                        poked.add(i)
-                if hit is not None:
+                if covered_point(p, n):
                     covered.add(i)
-            # Edge trim never unmasks skin that pokes out with fabric right behind it.
-            masked = {i for i in covered if i in poked or all(j in covered for j in neighbors[i])}
-            # Close pinholes: an unmasked vertex almost surrounded by masked ones.
-            for _ in range(2):
-                masked |= {i for i in range(len(points)) if i not in masked and len(neighbors[i]) >= 3
-                           and sum(j in masked for j in neighbors[i]) >= .75 * len(neighbors[i])}
-            # Double-check: find small skin islands fully enclosed by hidden skin.
-            # An island with clothing underneath it (clothing dipping inside the
-            # body) is hidden too. An island with no clothing underneath is a
-            # real opening in the garment (cutout, rip) and stays visible.
-            closed = left = 0
-            if is_body and masked:
-                seen = set(masked)
-                for start in range(len(points)):
-                    if start in seen:
-                        continue
-                    island, todo, enclosed = [], [start], True
-                    seen.add(start)
-                    while todo:
-                        i = todo.pop()
-                        island.append(i)
-                        if len(island) > island_limit:
-                            enclosed = False
-                        for j in neighbors[i]:
-                            if j not in seen:
-                                seen.add(j)
-                                todo.append(j)
-                    if not enclosed or len(island) < 1:
-                        continue
-                    # Clothing within 3 cm of nearly every vertex: a sliver the
-                    # fabric hugs, so hide it. A real opening is wider than that.
-                    under = sum(1 for i in island if tree.find_nearest(points[i], 3.0)[0] is not None)
-                    if under >= .8 * len(island):
-                        masked.update(island)
-                        closed += 1
-                    else:
-                        left += 1
-            # Final double-check: hidden skin that can be seen from outside (some
-            # view direction reaches it without passing clothing or body) would
-            # open a hole, so it stays visible. Skin poking out through fabric is
-            # kept hidden: the fabric right behind it shows instead.
-            unhidden = 0
-            for i in list(masked):
-                if i in poked:
-                    continue
-                p, n = points[i], normals[i]
-                tangent = n.orthogonal().normalized()
-                other = n.cross(tangent)
-                start = p + n * .05
-                for direction in _view_directions(n, tangent, other):
-                    if (tree.ray_cast(start, direction, 60.0)[0] is None
-                            and occluder.ray_cast(start, direction, 60.0)[0] is None):
-                        masked.discard(i)
-                        unhidden += 1
-                        break
-            masked = sorted(masked)
+            face_covered = []
+            probes = ((.5, .5, 0), (.5, 0, .5), (0, .5, .5),
+                      (1/3, 1/3, 1/3), (.6, .2, .2), (.2, .6, .2), (.2, .2, .6))
+            for triangle in triangles:
+                ok = all(vertex in covered for vertex in triangle)
+                if ok:
+                    a, b, c = triangle
+                    for x, y, z in probes:
+                        p = points[a]*x + points[b]*y + points[c]*z
+                        n = normals[a]*x + normals[b]*y + normals[c]*z
+                        if not covered_point(p, n):
+                            ok = False
+                            break
+                face_covered.append(ok)
+            masked = [i for i in covered if neighbors[i] and incident[i]
+                      and all(j in covered for j in neighbors[i])
+                      and all(face_covered[j] for j in incident[i])]
             if masked:
                 group = body.vertex_groups.get(name) or body.vertex_groups.new(name=name)
                 group.add(masked, 1.0, 'REPLACE')
             counts[name] = len(masked)
-            checks[name] = {'enclosed_spots_hidden': closed, 'openings_left_visible': left,
-                            'visible_points_kept_unhidden': unhidden}
-        result[clean_mesh(mesh.name)] = {'vertices': len(points), 'masked': counts, 'double_check': checks}
+            face_checks[name] = {'vertex_hits': len(covered),
+                                 'sampled_triangles_covered': sum(face_covered),
+                                 'triangles': len(triangles)}
+        result[clean_mesh(mesh.name)] = {'vertices': len(points), 'masked': counts,
+                                         'face_coverage': face_checks}
     return result
 
 
-def _prune_visible_masks(base, clothing):
+
+def _prune_visible_masks(base, clothing, *, _coverage_trees=None):
     """Un-hide every masked body point that can be seen from outside.
 
     Applies to all masks, including a donor's own, so no mask opens a hole.
@@ -442,11 +531,12 @@ def _prune_visible_masks(base, clothing):
             tris.extend(tuple(offset + i for i in t.vertices) for t in obj.data.loop_triangles)
         return BVHTree.FromPolygons(verts, tris, all_triangles=True) if tris else None
 
-    occluder = tree(bodies)
+    occluder = _coverage_trees.get('body') if _coverage_trees is not None else tree(bodies)
     pruned = {}
     for mode, side in (('HPL_Ring', 0), ('HPL_Entrance', 1)):
-        cloth = tree([o for o in clothing if not clean_mesh(o.data.name).startswith('S_') and o.data.polygons
-                      and _clothing_visibility(o)[side]])
+        cloth = (_coverage_trees.get(mode) if _coverage_trees is not None else
+                 tree([o for o in clothing if not clean_mesh(o.data.name).startswith('S_') and o.data.polygons
+                       and _clothing_visibility(o)[side]]))
         for body in bodies:
             group = body.vertex_groups.get(mode)
             if group is None:
@@ -467,7 +557,7 @@ def _prune_visible_masks(base, clothing):
                 start = p + n * .05
                 for direction in _view_directions(n, tangent, other):
                     if ((cloth is None or cloth.ray_cast(start, direction, 60.0)[0] is None)
-                            and occluder.ray_cast(start, direction, 60.0)[0] is None):
+                            and (occluder is None or occluder.ray_cast(start, direction, 60.0)[0] is None)):
                         drop.append(i)
                         break
             if drop:
@@ -476,26 +566,84 @@ def _prune_visible_masks(base, clothing):
     return pruned
 
 
-def _body_hide_masks(job, base, clothing, donor_counts, warnings):
-    """Combine the donor's own HPL (when it fits) with generated masks, then
-    double-check every masked point so no mask opens a hole."""
+def _body_hide_masks(job, base, clothing, donor_counts, warnings, *, fit_report=None):
+    """Validate authored masks against fitted clothing, or generate new masks.
+
+    Native index compatibility alone does not establish current coverage:
+    fitting can move a strap, and donor head masks can belong to donor hair
+    that the swap does not retain. Every final hidden vertex must therefore
+    pass the same current-clothing coverage checks.
+    """
     result = _apply_donor_hpl(job, base, donor_counts, warnings)
-    if not result['applied']:
+    authored = {}
+    if result['applied']:
+        for body in base['meshes']:
+            if clean_mesh(body.data.name).casefold() not in ('m_body', 'm_head'):
+                continue
+            for name in ('HPL_Ring', 'HPL_Entrance'):
+                group = body.vertex_groups.get(name)
+                authored[(body, name)] = ({v.index for v in body.data.vertices
+                                          if any(g.group == group.index and g.weight > 0
+                                                 for g in v.groups)} if group else set())
+    else:
         result['donor_masks_skipped'] = result.pop('reason', None)
-    result['generated'] = _generate_hpl(base, clothing)
-    result['visible_points_unhidden'] = _prune_visible_masks(base, clothing)
-    result['applied'] = any(len([v for v in o.data.vertices if v.groups]) for o in base['meshes']
-                            if any(g.name.startswith('HPL_') for g in o.vertex_groups))
+    interior = [item['mesh'] for item in (fit_report or {}).get('objects', [])
+                if item.get('status') == 'interior_item_unchanged']
+    diagnostics = {}
+    coverage_trees = {}
+    result['generated'] = _generate_hpl(base, clothing, interior_meshes=interior,
+                                       diagnostics=diagnostics, _trees_out=coverage_trees)
+    result['generated_mask_diagnostics'] = diagnostics
+    result['visible_points_unhidden'] = _prune_visible_masks(base, clothing,
+                                                          _coverage_trees=coverage_trees)
+    for body in base['meshes']:
+        if clean_mesh(body.data.name).casefold() not in ('m_body', 'm_head'):
+            continue
+        for name in ('HPL_Ring', 'HPL_Entrance'):
+            group = body.vertex_groups.get(name)
+            count = sum(any(g.group == group.index and g.weight > 0 for g in v.groups)
+                        for v in body.data.vertices) if group else 0
+            result['generated'][clean_mesh(body.data.name)]['masked'][name] = count
+    if authored:
+        validation = []
+        for (body, name), original in authored.items():
+            group = body.vertex_groups.get(name)
+            covered = ({v.index for v in body.data.vertices
+                        if any(g.group == group.index and g.weight > 0 for g in v.groups)}
+                       if group else set())
+            retained = original & covered
+            validation.append({'mesh': clean_mesh(body.data.name), 'scene': name,
+                               'authored_vertices': len(original),
+                               'retained_vertices': len(retained),
+                               'new_covered_vertices': len(covered - original),
+                               'uncovered_authored_vertices_removed': len(original - retained)})
+        result['authored_mask_coverage_validation'] = validation
+        if any(v['uncovered_authored_vertices_removed'] for v in validation):
+            warnings.append('Authored body masks were trimmed where the fitted clothing '
+                            'does not safely cover the skin.')
+    skipped = sum(item['triangles'] for item in diagnostics['skipped_material_faces'])
+    if skipped:
+        warnings.append('Body masking skipped %d clothing triangles with transparent or '
+                        'unverified opacity; inspect those garments.' % skipped)
+    result['applied'] = any(sum(v['masked'].values()) for v in result['generated'].values())
     if not result['applied']:
         warnings.append('No body hide-masks (HPL) could be made; skin may show through the clothing.')
-        body_check = (result['generated'].get('M_Body') or {}).get('double_check', {})
-        hidden = max((c['enclosed_spots_hidden'] for c in body_check.values()), default=0)
-        visible = max((c['openings_left_visible'] for c in body_check.values()), default=0)
-        result['double_check_summary'] = {'enclosed_spots_hidden': hidden, 'openings_left_visible': visible}
-        if visible:
-            warnings.append('Mask check: %d small skin area(s) inside the clothing were left visible because the '
-                            'garment has an opening there. Inspect them.' % visible)
     return result
+
+
+
+def _drop_undriven_clothing_cages(bundle, driven):
+    """Keep v0.5.4's stray-cage repair scoped to donor clothing only."""
+    import bpy
+    dropped = []
+    for obj in list(bundle['clothing']):
+        cage = clean_mesh(obj.data.name)
+        if cage.startswith('S_') and cage not in driven:
+            bundle['clothing'].remove(obj)
+            bundle['meshes'].remove(obj)
+            dropped.append(cage)
+            bpy.data.objects.remove(obj, do_unlink=True)
+    return dropped
 
 
 def _copy_attachments(source_collection, bundle):
@@ -971,7 +1119,8 @@ def run(config):
             for group in list(obj.vertex_groups):
                 if group.name.startswith('HPL_'):
                     obj.vertex_groups.remove(group)
-        report['body_hide_masks'] = _body_hide_masks(job, base, bundle['clothing'], donor_body_counts, warnings)
+        report['body_hide_masks'] = _body_hide_masks(job, base, bundle['clothing'], donor_body_counts,
+                                                     warnings, fit_report=report.get('fit'))
         character = stage / 'Characters' / job['base_character'].name
         attire = character / job['base_attire'].parent.name
         attire.mkdir(parents=True)
@@ -999,14 +1148,7 @@ def run(config):
                           and p.suffix.casefold() == '.ycl' and p.stem.casefold() == job['base_attire'].stem.casefold()]
         driven = ({m.decode() for m in re.findall(rb'S_[A-Za-z0-9_]+', base_ycl_files[0].read_bytes())}
                   if len(base_ycl_files) == 1 else set())
-        dropped = []
-        for obj in list(bundle['clothing']):
-            cage = clean_mesh(obj.data.name)
-            if cage.startswith('S_') and cage not in driven:
-                bundle['clothing'].remove(obj)
-                bundle['meshes'].remove(obj)
-                dropped.append(cage)
-                bpy.data.objects.remove(obj, do_unlink=True)
+        dropped = _drop_undriven_clothing_cages(bundle, driven)
         report['dropped_undriven_cages'] = dropped
         if dropped:
             warnings.append('Left out donor physics cage(s) %s: the outgoing .ycl does not drive them, so they '

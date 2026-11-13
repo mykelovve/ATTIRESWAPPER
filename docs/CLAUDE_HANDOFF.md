@@ -3,7 +3,7 @@
 > **Superseded 2026-11-13:** the owner resumed work and v0.5.4 is now released. Read `docs/HANDOFF_TO_CHATGPT.md` for the current state; the release policy below still applies.
 
 ## Current instruction
-Further model repairs and new feature work are paused at the owner's request. Complete release/documentation bookkeeping only. Resume other work only when the owner asks.
+The owner has resumed attire replacement work. Read docs/HANDOFF_TO_CHATGPT.md and the latest stable release; the v0.4 details below are historical.
 
 ## Verified release
 - Repository: https://github.com/mykelovve/ATTIRESWAPPER

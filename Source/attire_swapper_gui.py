@@ -13,7 +13,9 @@ import ntpath
 import os
 from pathlib import Path
 import queue
+import re
 import secrets
+import signal
 import shutil
 import subprocess
 import sys
@@ -27,7 +29,7 @@ from urllib.parse import urlsplit
 
 
 APP_NAME = "Mykelovve Attire Swapper"
-APP_VERSION = "0.5.4"
+APP_VERSION = "0.5.5"
 _DLL_HANDLES = []
 _PREVIEW_LOCK = threading.Lock()
 _DLL_SEARCH_LOCK = threading.Lock()
@@ -89,7 +91,27 @@ def discover_blender() -> str:
         root = os.environ.get(name)
         if root:
             candidates.extend(sorted((Path(root) / "Blender Foundation").glob("Blender*/blender.exe"), reverse=True))
-    return str(next((p for p in candidates if p.is_file()), ""))
+    # PATH and reverse lexical order used to select Blender 5.x ahead of the
+    # supported 4.3/4.4 installs. Versioned installation folders are enough to
+    # rank discovery without starting several executables on the Tk thread.
+    available = {str(p.resolve()): p for p in candidates if p.is_file()}
+    ranked = sorted(available.values(), key=_blender_preference)
+    return str(ranked[0]) if ranked else ""
+
+
+def blender_version_hint(executable) -> tuple[int, int] | None:
+    matches = list(re.finditer(r"(?:^|[/\\])blender[ _-]*(\d+)\.(\d+)(?:\.\d+)?(?=[/\\ _-]|$)",
+                               str(executable), re.IGNORECASE))
+    return tuple(map(int, matches[-1].groups())) if matches else None
+
+
+def _blender_preference(executable):
+    version = blender_version_hint(executable)
+    if version in ((4, 3), (4, 4)):
+        return (0, -version[0], -version[1], str(executable).casefold())
+    if version is None:
+        return (1, 0, 0, str(executable).casefold())
+    return (2, -version[0], -version[1], str(executable).casefold())
 
 
 def _load_renderer():
@@ -252,8 +274,13 @@ def spawn_blender(command: list[str]):
                      encoding="utf-8", errors="replace", bufsize=1,
                      creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
                      env=blender_environment())
+    if os.name != "nt":
+        arguments["start_new_session"] = True
     if os.name != "nt" or not getattr(sys, "frozen", False):
-        return subprocess.Popen(command, **arguments)
+        process = subprocess.Popen(command, **arguments)
+        if os.name != "nt":
+            process._swapper_process_group = process.pid
+        return process
     import ctypes
     from ctypes import wintypes
     with _DLL_SEARCH_LOCK:
@@ -275,6 +302,56 @@ def spawn_blender(command: list[str]):
                 raise ctypes.WinError(ctypes.get_last_error())
 
 
+def stop_blender(process) -> None:
+    """Stop only this app's Blender process tree, retaining all job files."""
+    if os.name == "nt":
+        # This is the same owned-process-tree stop used by the verified updater.
+        # It stops descendants while the worker is live. Windows launchers that
+        # exit before their children need separate Job Object containment; this
+        # helper does not claim containment of already-orphaned Windows children.
+        from app_updater import ProcessOperations
+        ProcessOperations().stop(process)
+        return
+    group = getattr(process, "_swapper_process_group", None)
+    if group != process.pid:
+        raise RuntimeError("The worker does not own a recorded process group; it was not stopped.")
+    try:
+        # The group remains owned by its children even after a launcher exits.
+        # Looking up only a live parent's PID would leave those children alive.
+        if process.poll() is None and os.getpgid(process.pid) != group:
+            raise RuntimeError("The worker does not own its process group; it was not stopped.")
+        os.killpg(group, signal.SIGTERM)
+        try:
+            process.wait(timeout=10)
+        except subprocess.TimeoutExpired:
+            pass
+        # A child can ignore SIGTERM or outlive an exited launcher. Finish the
+        # owned group before allowing another model task to start.
+        try:
+            os.killpg(group, signal.SIGKILL)
+        except ProcessLookupError:
+            pass
+        process.wait(timeout=5)
+    except ProcessLookupError:
+        process.wait(timeout=5)
+
+
+def probe_blender_version(executable) -> tuple[int, int, int] | None:
+    """Probe the selected executable off the Tk thread before a swap."""
+    process = spawn_blender([str(executable), "--version"])
+    try:
+        output, _ = process.communicate(timeout=5)
+    except subprocess.TimeoutExpired:
+        stop_blender(process)
+        return None
+    match = re.search(r"(?m)^Blender\s+(\d+)\.(\d+)(?:\.(\d+))?\b", output)
+    return tuple(int(v or 0) for v in match.groups()) if match else None
+
+
+class SwapCancelled(RuntimeError):
+    """A requested stop, handled without a failure dialog."""
+
+
 class AttireSwapperApp:
     def __init__(self, root):
         import tkinter as tk
@@ -285,6 +362,12 @@ class AttireSwapperApp:
         self.update_busy = False
         self.pending_update = None
         self.process = None
+        self.process_lock = threading.Lock()
+        self.cancel_requested = threading.Event()
+        self.cancel_busy = False
+        self.task_kind = None
+        self.task_token = None
+        self.task_failed = False
         self.host = None
         self.last_result = None
         self.last_output = None
@@ -435,6 +518,9 @@ class AttireSwapperApp:
         self.result_button.pack(side="left", padx=10)
         self.repair_button = self._button(actions, "Repair options", self._toggle_repairs)
         self.repair_button.pack(side="left")
+        self.cancel_button = self._button(actions, "Cancel swap", self._cancel_swap)
+        self.cancel_button.pack(side="left", padx=(10, 0))
+        self.cancel_button.state(["disabled"])
         self.result_button.state(["disabled"])
         self.repair_options = self._card(main, padding=13)
         self.repair_options.grid(row=3, column=0, sticky="ew", pady=(0, 12))
@@ -721,17 +807,56 @@ class AttireSwapperApp:
             if not self.last_output:
                 self.output_button.state(["disabled"])
             self.progress.stop()
+        self._sync_cancel_button()
 
-    def _thread(self, action):
+    def _sync_cancel_button(self):
+        button = getattr(self, "cancel_button", None)
+        if button is not None:
+            enabled = self.busy and self.task_kind == "swap" and not self.cancel_busy
+            button.state(["!disabled"] if enabled else ["disabled"])
+
+    def _thread(self, action, *, kind="task", completion="Ready"):
+        self.task_kind = kind
+        self.task_token = object()
+        self.task_failed = False
+        self._sync_cancel_button()
         def run():
+            status = completion
             try:
                 action()
+            except SwapCancelled:
+                status = "Swap cancelled · logs and any unfinished output were retained."
+                self.events.put(("log", status))
             except Exception as error:
+                status = "Action failed · see the swap log for details."
                 self.events.put(("error", ("Action could not be completed", str(error))))
                 self.events.put(("log", traceback.format_exc()))
             finally:
-                self.events.put(("idle", None))
-        threading.Thread(target=run, daemon=True).start()
+                self.events.put(("idle", status))
+        thread = threading.Thread(target=run, daemon=True)
+        thread.start()
+        return thread
+
+    def _cancel_swap(self):
+        if not self.busy or self.task_kind != "swap" or self.cancel_busy:
+            return
+        self.cancel_requested.set()
+        self.cancel_busy = True
+        self._sync_cancel_button()
+        self.status.set("Stopping swap… keeping worker logs and unfinished output.")
+        self._log("Cancellation requested. Source files and existing outputs are retained.")
+        # Capture the owned process now. A delayed stop thread must never look
+        # up a newer task's process after this task has already finished.
+        with self.process_lock:
+            process = self.process
+        token = self.task_token
+        def stop():
+            try:
+                if process is not None:
+                    stop_blender(process)
+            except Exception as error:
+                self.events.put(("cancel_error", (token, str(error))))
+        threading.Thread(target=stop, name="cancel-swap", daemon=True).start()
 
     def _view_page(self, page):
         if self.host is None:
@@ -773,7 +898,7 @@ class AttireSwapperApp:
             problems = built.get("result", {}).get("problems", [])
             self.events.put(("log", "3D preview ready (%d reported pose issue%s). Static preview; physics unverified." %
                              (len(problems), "" if len(problems) == 1 else "s")))
-        self._thread(work)
+        self._thread(work, kind="preview", completion="Ready · 3D preview created.")
 
     def _choose_any_model(self):
         """Pick any extracted character folder, then one of its attires."""
@@ -838,9 +963,12 @@ class AttireSwapperApp:
         self.progress.start(12)
         self._log("Checking " + label + ": " + target[0] + " / " + target[1])
         blender_path = str(Path(blender).expanduser())
-        self._thread(lambda: self._run_check(blender_path, target[0], target[1], target[2], label=label))
+        self._thread(lambda: self._run_check(blender_path, target[0], target[1], target[2], label=label),
+                     kind="check", completion="Ready · model check completed.")
 
     def _run_check(self, blender, character, attire, report=None, label="model", auto=False):
+        if auto and self.cancel_requested.is_set():
+            raise SwapCancelled()
         folder = self.temp / ("check-" + time.strftime("%Y%m%d-%H%M%S") + "-" + secrets.token_hex(2))
         folder.mkdir()
         result_path = folder / "result.json"
@@ -853,18 +981,33 @@ class AttireSwapperApp:
         log_file = folder / "blender.log"
         with log_file.open("w", encoding="utf-8") as log:
             process = spawn_blender(check_command(blender, job))
-            for line in process.stdout:
-                log.write(line)
-                if line.startswith("CHECK_PROGRESS "):
-                    try:
-                        self.events.put(("status", "Checking " + label + ": " + json.loads(line[15:])["step"]))
-                    except (ValueError, KeyError):
-                        pass
-            process.wait()
+            with self.process_lock:
+                self.process = process
+            try:
+                if auto and self.cancel_requested.is_set():
+                    stop_blender(process)
+                for line in process.stdout:
+                    log.write(line)
+                    log.flush()
+                    if line.startswith("CHECK_PROGRESS "):
+                        try:
+                            self.events.put(("status", "Checking " + label + ": " + json.loads(line[15:])["step"]))
+                        except (ValueError, KeyError):
+                            pass
+                code = process.wait()
+            finally:
+                if process.poll() is None or os.name != "nt":
+                    stop_blender(process)
+                if process.stdout is not None:
+                    process.stdout.close()
+                with self.process_lock:
+                    self.process = None
+        if auto and self.cancel_requested.is_set():
+            raise SwapCancelled()
         if not result_path.is_file():
             raise RuntimeError("The model check stopped without a result. Details: %s" % log_file)
         result = json.loads(result_path.read_text(encoding="utf-8"))
-        if not result.get("success"):
+        if code != 0 or not result.get("success"):
             raise RuntimeError("The model check failed: %s\nDetails: %s" % (result.get("error"), log_file))
         self.events.put(("check", (label, result, auto)))
 
@@ -920,28 +1063,56 @@ class AttireSwapperApp:
             self._error("Could not prepare output", error)
             return
         self._save_preferences()
+        self.cancel_requested.clear()
+        self.cancel_busy = False
         self.progress.configure(mode="determinate", value=0)
         self._set_busy(True, "Creating attire swap… source model files are read only.")
         self._log("Creating new draft: " + str(output))
-        self._thread(lambda: self._run_swap(str(blender), job, result_path))
+        self._thread(lambda: self._run_swap(str(blender), job, result_path), kind="swap",
+                     completion="Ready · draft created; inspect the 3D result.")
 
     def _run_swap(self, blender, job, result_path):
+        if self.cancel_requested.is_set():
+            raise SwapCancelled()
+        version = probe_blender_version(blender)
+        if version is None:
+            self.events.put(("log", "Could not identify the selected Blender version. Blender 4.3 or 4.4 is recommended."))
+        else:
+            self.events.put(("log", "Using Blender " + ".".join(map(str, version)) + "."))
+            if version[:2] not in ((4, 3), (4, 4)):
+                self.events.put(("log", "This Blender version is not validated for game exports. Prefer Blender 4.3 or 4.4 if the swap fails."))
+        if self.cancel_requested.is_set():
+            raise SwapCancelled()
         log_file = job.parent / "blender.log"
         with log_file.open("w", encoding="utf-8") as log:
-            self.process = spawn_blender(blender_command(blender, job))
-            for line in self.process.stdout:
-                log.write(line)
-                log.flush()
-                line = line.rstrip()
-                if line.startswith("SWAP_PROGRESS "):
-                    try:
-                        self.events.put(("progress", json.loads(line[len("SWAP_PROGRESS "):])))
-                    except ValueError:
+            process = spawn_blender(blender_command(blender, job))
+            with self.process_lock:
+                self.process = process
+            try:
+                # Cancel may arrive between the pre-spawn check and assignment.
+                if self.cancel_requested.is_set():
+                    stop_blender(process)
+                for line in process.stdout:
+                    log.write(line)
+                    log.flush()
+                    line = line.rstrip()
+                    if line.startswith("SWAP_PROGRESS "):
+                        try:
+                            self.events.put(("progress", json.loads(line[len("SWAP_PROGRESS "):])))
+                        except ValueError:
+                            self.events.put(("log", line))
+                    elif line:
                         self.events.put(("log", line))
-                elif line:
-                    self.events.put(("log", line))
-            code = self.process.wait()
-            self.process = None
+                code = process.wait()
+            finally:
+                if process.poll() is None or os.name != "nt":
+                    stop_blender(process)
+                if process.stdout is not None:
+                    process.stdout.close()
+                with self.process_lock:
+                    self.process = None
+        if self.cancel_requested.is_set():
+            raise SwapCancelled()
         if not result_path.is_file():
             raise RuntimeError("Blender stopped without a swap result (exit %s). Details: %s" % (code, log_file))
         result = json.loads(result_path.read_text(encoding="utf-8"))
@@ -950,12 +1121,16 @@ class AttireSwapperApp:
         for key in ("output_character", "output_attire", "output_root"):
             if not result.get(key):
                 raise RuntimeError("The swap worker returned an incomplete result: " + key)
+        if self.cancel_requested.is_set():
+            raise SwapCancelled()
         self.events.put(("result", result))
         # Check every finished swap automatically, so problems are listed at once.
         try:
             self.events.put(("status", "Checking the finished swap..."))
             self._run_check(blender, result["output_character"], result["output_attire"],
                             result.get("report_path"), label="swap result", auto=True)
+        except SwapCancelled:
+            raise
         except Exception as error:
             self.events.put(("log", "Automatic check could not run: " + str(error)))
 
@@ -966,6 +1141,8 @@ class AttireSwapperApp:
                 if kind == "log":
                     self._log(value)
                 elif kind == "progress":
+                    if self.cancel_requested.is_set() and self.task_kind == "swap":
+                        continue
                     fraction = max(0, min(1, float(value.get("fraction", 0))))
                     self.progress.configure(value=100 * fraction)
                     self.status.set(value.get("step", "Creating swap…"))
@@ -974,8 +1151,11 @@ class AttireSwapperApp:
                     try:
                         self._view_page(value)
                     except Exception as error:
+                        self.task_failed = True
                         self._error("Could not open the preview window", error)
                 elif kind == "result":
+                    if self.cancel_requested.is_set() and self.task_kind == "swap":
+                        continue
                     self.last_result = value
                     self.last_output = value["output_root"]
                     self.progress.configure(value=100)
@@ -1001,9 +1181,28 @@ class AttireSwapperApp:
                                             text + ("\n\n" + "\n\n".join(lines[:8]) if lines else "\n\nEverything checked out."),
                                             parent=self.root)
                 elif kind == "error":
+                    self.task_failed = True
                     self._error(*value)
                 elif kind == "idle":
-                    self._set_busy(False, "Ready · draft created; inspect the 3D result." if self.last_result else "Ready")
+                    cancelled = self.task_kind == "swap" and self.cancel_requested.is_set()
+                    self.task_kind = None
+                    self.cancel_busy = False
+                    status = "Action failed · see the swap log for details." if self.task_failed else (value or "Ready")
+                    if cancelled and not self.task_failed:
+                        status = "Swap cancelled · logs and any unfinished output were retained."
+                    self._set_busy(False, status)
+                elif kind == "cancel_error":
+                    token, error = value
+                    if token is not self.task_token:
+                        self._log("Earlier worker stop finished with: " + error)
+                        continue
+                    if not self.busy or self.task_kind != "swap":
+                        self._log("Worker stop finished with: " + error)
+                        continue
+                    self.cancel_busy = False
+                    self._sync_cancel_button()
+                    self._log("Could not stop the swap yet: " + error)
+                    self.status.set("Could not stop the swap yet · retry Cancel swap.")
                 elif kind == "update_progress":
                     self.update_status.configure(text="Downloading update · %d%%" % value)
                 elif kind == "update_current":
@@ -1058,20 +1257,20 @@ class AttireSwapperApp:
         from tkinter import messagebox
         if self.busy:
             if self.process is None:
+                if self.task_kind == "swap":
+                    self._cancel_swap()
                 messagebox.showinfo("Task is still running", "Keep this window open until the preview or swap preparation finishes.", parent=self.root)
                 return
             if not messagebox.askyesno("Close while working?", "A task is still running. Close the app and stop it? Source models are preserved, but unfinished output is a draft.", parent=self.root):
                 return
             process = self.process
             if process is not None:
+                self.cancel_requested.set()
                 try:
-                    process.terminate()
-                    process.wait(timeout=10)
-                except subprocess.TimeoutExpired:
-                    process.kill()
-                    process.wait(timeout=5)
-                except OSError:
-                    pass
+                    stop_blender(process)
+                except Exception as error:
+                    self._error("Could not stop the swap", error)
+                    return
         self._save_preferences()
         if self.host is not None:
             self.host.close()

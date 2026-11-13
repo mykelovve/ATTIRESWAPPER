@@ -1,0 +1,46 @@
+{
+  "application": "Mykelovve Attire Swapper",
+  "version": "0.5.5",
+  "previous_release": "0.5.4",
+  "changes": [
+    "Exact BaseModel file identity required for authored native-index HPL reuse.",
+    "All final masks, including authored masks, validated against fitted opaque clothing with incident-triangle probes.",
+    "Stale masks, transparent/unverified coverage and interior accessories excluded.",
+    "Cancel swap with retained logs/output; accurate per-action status; Blender4.4/4.3 discovery preference."
+  ],
+  "local_checks": {
+    "blender": "4.3.2 Linux",
+    "mask_safety_checks": 28,
+    "workflow_tests": 18,
+    "existing_fit_checks": 12,
+    "base_hair_YCL_and_native_SDK_paths_unchanged": true,
+    "retained_v054_modules_byte_identical": 8,
+    "callum_style_cage_regressions": 3
+  },
+  "windows_release_gate": "Required: sealed EXE self-test, actual original-theme Tk controls, Windows workflow regression tests. See release workflow artifact for completed results.",
+  "limitations": [
+    "Finite rest-pose probes do not prove all pixels or animations.",
+    "This release has not been tested in WWE2K26.",
+    "Copied base YCL may describe different clothing cages; deliberate cloth retargeting remains separate.",
+    "Windows cancellation stops a live owned worker tree; already orphaned Windows descendants are not claimed."
+  ],
+  "source_sha256": {
+    "app_updater.py": "fd2a448348cb9838b0128222d597bfb7c9ff310f6c20878710494d681a5d596d",
+    "attire_swapper_gui.py": "9fbf30e2677c169b04b1684b624ab95a5d3fcaf5a9b143fbfb35ba283aa6cc24",
+    "fit_helpers.py": "2e524e5152ddc2a398b9fa01a356334d4e3c20bb38f0d46f05d29eda91f87df4",
+    "garment_fit.py": "3c2f1d7e5bc9f09d127f214ce5b83b46a9efa1145c32985eaf51ad148da4a45b",
+    "merge_helpers.py": "77174bd1194325591df7dc42e1973b036148c159b5d1d28dace6cf36987f0343",
+    "model_check.py": "e345b2864b9fbf1477cfafa633e0b72c3c3488643cf2cb5876a9488f67a7ed28",
+    "model_layout.py": "3714168702ae0c14bc6d5198b2c5ef6c213ed10cdd0cd28c45d53e6ae7b5053b",
+    "swap_job.py": "c50bcef694144557ed4b174cf81a447963cce439f7f032ff58f19608f5d27110",
+    "swap_worker.py": "538cc346d69f68dca13de2fbd0a40ff63675bad406a9c476585c21fc32fab7f2",
+    "ui_texture_preview.py": "94d04d5e7e39440d07b53f92daff95ff51f6e207a98873d51768db7d9d3eb809"
+  },
+  "retained_v054": [
+    "Check Model and automatic result checks",
+    "Donor beard exclusion",
+    "No-J_Hair bases and travel rounding tolerance",
+    "Unsupported donor cage exclusion",
+    "Far-side limb protection and final visibility pruning"
+  ]
+}

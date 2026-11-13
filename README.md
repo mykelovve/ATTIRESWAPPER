@@ -6,7 +6,7 @@ Windows attire swapping and a textured 3D model viewer for WWE 2K26.
 
 Get the Windows portable ZIP from [Releases](../../releases/latest), extract it, and run the included EXE. Python is included. Viewing models does not require Blender.
 
-Current release: **v0.5.4 Preview**. v0.4 and later install it from **Update app**. Install this ZIP once by hand if you have v0.3 or earlier; those versions cannot install updates themselves.
+Current release: **v0.5.5 Preview**. v0.4 and later install it from **Update app**. Install this ZIP once by hand if you have v0.3 or earlier; those versions cannot install updates themselves.
 
 ## Updates
 
@@ -25,6 +25,14 @@ Keep `.mdl` and `.mcd` filenames intact. v0.3 recognizes both formats and valida
 ## Viewer
 
 Drag to rotate, right-drag to pan, and scroll to zoom. Ring, Entrance, Standing, Arms up, Flex and Open mouth use the original Formatter viewer engine. Base, donor and result previews are available from the sidebar.
+
+## v0.5.5 mask edges and swap controls
+
+Masks now require coverage across every incident body triangle, using vertex, edge and interior probes. Authored masks are checked against the fitted clothing too, and old assignments are cleared first. This addresses holes outside narrow straps and uncovered head regions. Donor native-index masks require byte-identical BaseModel files; matching vertex counts alone is insufficient.
+
+Transparent or unverified-opacity faces, mouthguards and fit-identified interior items do not hide skin. Claude's far-side limb guard and final visibility check remain in place. Coverage is sampled in the rest pose; recreate the swap after updating and inspect it in game.
+
+**Cancel swap** stops the owned worker, including the automatic checker, while retaining logs, unfinished output and prior completed swaps. Status reflects the current action's actual success or failure. Blender discovery prefers4.4/4.3 over5.x. Publishing now requires sealed-runtime, original-theme UI and workflow checks on a Windows runner before stable release.
 
 ## v0.5.4 Check model, no donor beards
 

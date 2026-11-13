@@ -1,6 +1,15 @@
-# Handoff from Claude — v0.5.4 released (2026-11-13)
+# Handoff — continuation after Claude v0.5.4
 
 The owner asked Claude to resume work, fix the clothing auto-fit, fix missing hair, and publish both so the in-app updater delivers them. That is done. This file says what shipped, how it was built and checked, and what is left.
+
+## v0.5.5 continuation
+The owner resumed attire replacement work. Preserve all v0.5.4 features: Check Model, donor-beard exclusion, no-J_Hair support, travel-limit tolerance, unsupported cage removal and far-side limb protection.
+
+The continuation adds conservative body-triangle coverage and material opacity checks. All masks, including authored ones, are checked against the fitted clothing; stale masks are cleared before regeneration. Donor-index reuse requires an identical native BaseModel file, including its index/remap domain. The v0.5.4 visibility pruning still runs, using the same eligible clothing surfaces as coverage generation.
+
+Cancel, accurate per-action status and Blender4.4/4.3 preference are added. Automatic model checks use the owned process lifecycle so cancellation does not leave them running. Logs and existing outputs are retained.
+
+Build from the verified v0.5.4 EXE with Python3.14 and previous tag v0.5.4. The original renderer/theme, native add-on, entry script and unrelated modules stay unchanged. The release workflow checks the sealed EXE and original-theme UI on Windows, then publishes only if those checks pass. Check workflow artifacts for actual validation results. Model-specific in-game validation remains required; rest-pose probes are not an all-animation guarantee.
 
 ## Owner rule for porting (do not break)
 The base model's hair stays **exactly** the same: geometry, textures and material files. Do not touch it. The only thing carried over for it is its physics: the base attire's `.ycl`, unchanged.
