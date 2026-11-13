@@ -1,0 +1,25 @@
+{
+  "application": "Mykelovve Attire Swapper",
+  "version": "0.5.1",
+  "update_repository": "mykelovve/ATTIRESWAPPER",
+  "changes": [
+    "Base hair material files (.jmtl) are shipped byte for byte from the base attire instead of being regenerated without their *_flow/*_rai texture links (cause of missing or see-through hair in game).",
+    "The base attire's .ycl is copied unchanged when it exists; otherwise none is added and the log says so.",
+    "APP_VERSION 0.5.1. All other modules unchanged from v0.5.0."
+  ],
+  "environment": "Native Windows 11 (owner's PC), Blender 4.4 and 5.2, Python 3.14",
+  "checks": {
+    "build_integrity": "tools/repackage_exe.py from the sealed v0.5.0 EXE: only attire_swapper_gui and swap_worker replaced; every archive entry verified; bundled worker equals the tested worker (line endings aside).",
+    "self_test": "--self-test success: version 0.5.1, 19 valid PNGs.",
+    "full_swaps_blender_4_4": "Swerve: 3 hair .jmtl identical to base (with flow/rai links), hair geometry change 0.0, xxx_Attire.ycl copied byte-identical. Speedball/Bailey: 4 hair .jmtl identical to base, hair geometry change 0.0, base has no .ycl so none added.",
+    "in_app_update_native_windows": "Real v0.5 installer helper updated a running v0.5 copy to v0.5.1: verified backup, atomic replace, relaunch health version 0.5.1, no rollback.",
+    "carried_from_v0_5_0": "Fit regression test 12/12; v0.4 -> v0.5 update; previews valid."
+  },
+  "limitations": [
+    "Not tested in WWE 2K26 by Claude; check hair and physics in game.",
+    "A copied base .ycl also describes the base attire's own clothing cages; when donor clothing differs, check clothing physics in game.",
+    "The base Bailey (United Empire) attire ships no .ycl, so its hair has no YCL to carry over.",
+    "Some deep clothing penetration remains on tight garments and is reported.",
+    "The EXE is not code-signed."
+  ]
+}

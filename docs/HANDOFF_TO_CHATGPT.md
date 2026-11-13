@@ -1,8 +1,29 @@
-# Handoff from Claude — v0.5.0 released (2026-11-13)
+# Handoff from Claude — v0.5.1 released (2026-11-13)
 
-The owner asked Claude to resume work, fix the clothing auto-fit, and publish it so the in-app updater delivers it. That is done. This file says what shipped, how it was built and checked, and what is left.
+The owner asked Claude to resume work, fix the clothing auto-fit, fix missing hair, and publish both so the in-app updater delivers them. That is done. This file says what shipped, how it was built and checked, and what is left.
 
-## Released
+## Owner rule for porting (do not break)
+The base model's hair stays **exactly** the same: geometry, textures and material files. Do not touch it. The only thing carried over for it is its physics: the base attire's `.ycl`, unchanged.
+
+## Latest: v0.5.1 (base hair untouched)
+- [v0.5.1](https://github.com/mykelovve/ATTIRESWAPPER/releases/tag/v0.5.1) is the latest stable release.
+  - Tag commit: `e2fd482103eb39aaae9c5a6f2f2dfc55ed527a40`.
+  - ZIP SHA-256 `c19f40949cb61e7aa3d400fe1816020409fcb228d02010ca5b2e3aafe5730edb`, 81,701,851 bytes.
+  - EXE SHA-256 `ea4cac878a253287c1755589cceb320bb17a40f5f6c752431dae911acc244053`.
+  - Built with `tools/repackage_exe.py` from the v0.5.0 EXE, using `v0.5.0` as the previous tag.
+- **Bug fixed.** The exporter regenerated preserved hair `.jmtl` files without their `*_flow`/`*_rai` texture links, so hair went missing or see-through in game. That covers Speedball/Bailey's back hair (`M_Hair`, `hair_ALPHA`) and Swerve's hair. Present in v0.3–v0.5.
+  - The viewer did not show the bug because it reads DDS files by name.
+- **Fix** (`_restore_base_hair_materials` in `swap_worker.py`): for every base-hair material, ship the base attire's own `.jmtl` byte for byte. It is used only when its shader matches and every texture it references is shipped. The references stay valid because the output keeps the base character and attire folder names.
+- **`.ycl`:** copied unchanged from the base attire when it exists. The base Bailey (United Empire) attire has none, so none is added and the log says so. When the donor's clothing differs from the base attire's, the copied `.ycl` also describes the base attire's clothing cages, so check clothing physics in game.
+- **Checked on native Windows:**
+  - Self-test reports 0.5.1.
+  - Swerve and Bailey swaps: every hair `.jmtl` identical to the base's, hair geometry change 0.0, Swerve `.ycl` byte-identical.
+  - The bundled worker equals the tested worker.
+  - A real v0.5 → v0.5.1 in-app update passed its health check.
+  - Live: v0.4 and v0.5 both see 0.5.1, and the public download equals the tested EXE.
+  - The owner's test swaps are in `Documents/Mykelovve Attire Swaps/*-v051`.
+
+## Released (v0.5.0)
 - [v0.5.0](https://github.com/mykelovve/ATTIRESWAPPER/releases/tag/v0.5.0) is the latest stable release.
   - Tag commit: `c43930636878559881ae1e0b293df0c2fdd8a8e9`.
   - `Mykelovve_Attire_Swapper_v0.5_Portable.zip`: 81,696,655 bytes, SHA-256 `8693cbd1c48306f26ac990e84537fda5164e7a212109a9babbc673db09777fe3`.
@@ -56,7 +77,8 @@ The v0.5 swap covers the belly and shin, and most of the hips. Two upper-thigh p
 The viewer states it reads hidden skin the way the game does. The result has not been checked in game.
 
 ## What is left (priority order)
-1. **In-game check** of the `-v05` Swerve and Bailey swaps in WWE 2K26.
+1. **In-game check** of the `-v051` Swerve and Bailey swaps in WWE 2K26: hair, including the back of Speedball's hair, plus hair and clothing physics.
+   - If Speedball's back hair still misbehaves in game, the likely cause is physics. His base attire ships no `.ycl`, so ask the owner where his working hair physics comes from. Never alter the base hair to compensate.
 2. **Remaining deep penetration on tight garments.**
    - Option A: a per-garment larger limit with smooth falloff.
    - Option B: when base and donor are the same character, keep the mod's authored offset rather than forcing clearance.
