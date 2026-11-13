@@ -1,0 +1,25 @@
+{
+  "application": "Mykelovve Attire Swapper",
+  "version": "0.5.3",
+  "update_repository": "mykelovve/ATTIRESWAPPER",
+  "changes": [
+    "Base attire rigs without J_Hair no longer abort: the hair-bone graft is skipped (export rig is a copy of the base attire rig); base hair meshes preserved.",
+    "Fit: first-pass moves are clamped; travel-limit guard allows 32-bit float rounding (1e-3 cm).",
+    "Generated HPL: M_Body vertices poking out of deep clothing (nearest clothing within 15 cm, same-facing, vertex outside) are masked; pinholes closed; M_Head never uses this rule."
+  ],
+  "environment": "Native Windows 11 (owner's PC), Blender 4.4 and 5.2, Python 3.14",
+  "checks": {
+    "self_test": "success, version 0.5.3.",
+    "build_integrity": "repackaged from v0.5.2 EXE; bundled swap_worker, merge_helpers, fit_helpers, garment_fit equal the tested files.",
+    "mjf_carlito_slot": "Base Downloads/MJF '26 By JOEMASHUPS/1123_Carlito, donor Grix MJF Beach Break: failed in v0.5.2 (no J_Hair), now succeeds; hair M_Hair/M_Combinations change 0.0; masks generated.",
+    "swerve": "Swap succeeds; preview solid; two small skin specks remain on the thighs where the donor pants mesh dips deep inside the leg.",
+    "fit_regression_test": "12/12 on Blender 4.4.",
+    "in_app_update_native_windows": "v0.5.2 -> v0.5.3 success, no rollback."
+  },
+  "limitations": [
+    "Not tested in WWE 2K26 by Claude.",
+    "Generated masks are a rest-pose coverage estimate; a few small specks can remain, and skin at garment edges may show in extreme poses.",
+    "A copied base .ycl also describes the base attire's clothing cages.",
+    "The EXE is not code-signed."
+  ]
+}

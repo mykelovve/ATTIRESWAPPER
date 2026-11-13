@@ -1,4 +1,4 @@
-# Handoff from Claude — v0.5.2 released (2026-11-13)
+# Handoff from Claude — v0.5.3 released (2026-11-13)
 
 The owner asked Claude to resume work, fix the clothing auto-fit, fix missing hair, and publish both so the in-app updater delivers them. That is done. This file says what shipped, how it was built and checked, and what is left.
 
@@ -22,6 +22,21 @@ The base model's hair stays **exactly** the same: geometry, textures and materia
   - A real v0.5 → v0.5.1 in-app update passed its health check.
   - Live: v0.4 and v0.5 both see 0.5.1, and the public download equals the tested EXE.
   - The owner's test swaps are in `Documents/Mykelovve Attire Swaps/*-v051`.
+
+## v0.5.3 released: no-J_Hair bases and mask double-check
+- [v0.5.3](https://github.com/mykelovve/ATTIRESWAPPER/releases/tag/v0.5.3) is the latest release.
+  - Tag commit: `c5e934f`.
+  - ZIP SHA-256 `843f171665b6fd18071a9dce6d784f4cc4579891da362ac8fd86f732299201fe`.
+  - Built from the v0.5.2 EXE.
+- **Bases without J_Hair** (for example the MJF port in the Carlito slot): the worker no longer aborts. `merge_helpers.make_export_bundle` skips the hair-bone graft when the base attire rig has no `J_Hair`; the export rig is a copy of that rig anyway. Hair meshes are preserved.
+- **Fit:** first-pass moves are clamped, and the travel guard allows 1e-3 cm of float rounding. This fixes "a fitted vertex exceeded the travel limit".
+- **Mask generation** (`_generate_hpl`):
+  - Coverage needs a hit along the normal within 2.5 cm, plus at least 3 of 4 angled rays.
+  - The inward ray (4 cm) and the poke rule (nearest same-facing clothing straight behind the skin, `offset·face_normal > .9`) mark "poked" skin.
+  - Erosion, pinhole close, and an enclosed-sliver fill (clothing within 3 cm of 80% of the island).
+  - Final double-check: any hidden, non-poked point visible from one of 49 outward directions (not blocked by clothing or the body) is un-hidden.
+  - The owner's MJF screenshots had ring-mode holes on the shoulder, chest and side, plus holes at the collar and the right-hand wrap. They now measure 0 visible hidden points at the right hand, wrist and neck.
+- **Open:** the owner saw jacket clipping on the very first Swerve swap (Swerve '26 onto itself). Ask where it clips; not investigated.
 
 ## v0.5.2 released: body hide-masks (skin no longer shows through clothing)
 - [v0.5.2](https://github.com/mykelovve/ATTIRESWAPPER/releases/tag/v0.5.2) is the latest release.
