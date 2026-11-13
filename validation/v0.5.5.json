@@ -17,7 +17,15 @@
     "retained_v054_modules_byte_identical": 8,
     "callum_style_cage_regressions": 3
   },
-  "windows_release_gate": "Required: sealed EXE self-test, actual original-theme Tk controls, Windows workflow regression tests. See release workflow artifact for completed results.",
+  "windows_release_gate": {
+    "passed": true,
+    "run": "https://github.com/mykelovve/ATTIRESWAPPER/actions/runs/43458859010",
+    "native_frozen_self_test": true,
+    "original_theme_Tk_controls": true,
+    "internal_update_buttons": true,
+    "workflow_regressions": true,
+    "artifact_id": 14055277412
+  },
   "limitations": [
     "Finite rest-pose probes do not prove all pixels or animations.",
     "This release has not been tested in WWE2K26.",
@@ -42,5 +50,12 @@
     "No-J_Hair bases and travel rounding tolerance",
     "Unsupported donor cage exclusion",
     "Far-side limb protection and final visibility pruning"
-  ]
+  ],
+  "published": {
+    "release": "https://github.com/mykelovve/ATTIRESWAPPER/releases/tag/v0.5.5",
+    "source_commit": "b1fba8555d073eb10e95de05e88d9a85eb8d6a97",
+    "bytes": 81941973,
+    "sha256": "08ae926bc04fc420448cbe5d425a8459e411d76687e26225c64a3d0dea01af91",
+    "public_download_verified": true
+  }
 }

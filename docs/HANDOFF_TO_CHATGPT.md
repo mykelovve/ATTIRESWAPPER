@@ -2,7 +2,10 @@
 
 The owner asked Claude to resume work, fix the clothing auto-fit, fix missing hair, and publish both so the in-app updater delivers them. That is done. This file says what shipped, how it was built and checked, and what is left.
 
-## v0.5.5 continuation
+## v0.5.5 released
+[Download v0.5.5](https://github.com/mykelovve/ATTIRESWAPPER/releases/tag/v0.5.5). The complete public ZIP SHA256 is `08ae926bc04fc420448cbe5d425a8459e411d76687e26225c64a3d0dea01af91`. Matching source/tag: `b1fba8555d073eb10e95de05e88d9a85eb8d6a97`. Native Windows runtime, original-theme Tk controls and workflow tests passed in run43458859010. The public ZIP and server digest were verified.
+
+### Continuation changes
 The owner resumed attire replacement work. Preserve all v0.5.4 features: Check Model, donor-beard exclusion, no-J_Hair support, travel-limit tolerance, unsupported cage removal and far-side limb protection.
 
 The continuation adds conservative body-triangle coverage and material opacity checks. All masks, including authored ones, are checked against the fitted clothing; stale masks are cleared before regeneration. Donor-index reuse requires an identical native BaseModel file, including its index/remap domain. The v0.5.4 visibility pruning still runs, using the same eligible clothing surfaces as coverage generation.
