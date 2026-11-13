@@ -5,6 +5,10 @@ tall).  The default moves only clothing vertices initially inside the body;
 opt-in surface constraints also correct corners of penetrating coarse faces.
 Neither mode edits the body, UVs, polygon indices, skin weights, or materials.
 
+No vertex ever travels further than ``max_displacement``.  Vertices that would
+need more are tapered or left alone and reported, instead of vetoing the whole
+garment: hidden hems, caps and tucked-in geometry routinely sit far inside.
+
 Nearest-surface signed distance is suitable for the leg surfaces in this task;
 it is not a proof of solid containment for an open or self-intersecting mesh.
 The report therefore includes midpoint/centroid checks in addition to vertices.
@@ -103,10 +107,9 @@ def _sample_point(indices, weights, positions):
     return sum((positions[i] * w for i, w in zip(indices, weights)), Vector())
 
 
-def _surface_samples(bvh, obj, positions, tolerance):
+def _surface_samples(bvh, constraints, positions, tolerance):
     # Keep this diagnostic bounded; each geometric edge is sampled once and
     # polygon centroids catch triangles spanning a convex body surface.
-    constraints = _surface_constraints(obj)
     depths = [-_nearest(bvh, _sample_point(indices, weights, positions))[2]
               for indices, weights in constraints]
     inside = [d for d in depths if d > tolerance]
@@ -114,42 +117,81 @@ def _surface_samples(bvh, obj, positions, tolerance):
             'deepest_sample_penetration': max(inside, default=0.0)}
 
 
-def _project_surface_constraints(bvh, obj, positions, iterations,
-                                 surface_clearance, tolerance):
+def _clamp_travel(positions, original, index, limit):
+    """Keep one vertex inside the allowed travel ball around its source."""
+    offset = positions[index] - original[index]
+    length = offset.length
+    if length > limit:
+        positions[index] = original[index] + offset * (limit / length)
+
+
+def _allowed_travel(depth, clearance, limit):
+    """Travel budget for a vertex ``depth`` cm below the body surface.
+
+    ``fix``    it can reach ``clearance`` outside within the limit.
+    ``taper``  it cannot; it moves a shrinking distance so the garment stays
+               continuous between repaired and untouched regions.
+    ``deep``   twice the limit or deeper: intentional interior geometry or a
+               mismatch too large for an automatic fit. It is not moved.
+    """
+    needed = depth + clearance
+    if needed <= limit:
+        return needed, 'fix'
+    if depth >= 2.0 * limit:
+        return 0.0, 'deep'
+    return limit * (2.0 * limit - depth) / (limit + clearance), 'taper'
+
+
+def _project_surface_constraints(bvh, constraints, positions, original, frozen,
+                                 iterations, surface_clearance, tolerance, limit):
     """Position-based correction of sampled edge/face penetration.
 
     Unlike the initial pass this is explicitly allowed to move vertices that
     started outside: a coarse triangle can cross a convex body even when all
     its corners are outside.  Each correction uses the minimum squared-motion
-    distribution for the sample's barycentric weights.  Global travel limits
-    are checked by the caller before any Blender coordinates are written.
+    distribution for the sample's barycentric weights.
+
+    Samples that touch a frozen (tapered/deep) vertex, or that are themselves
+    deeper than the travel limit, cannot be resolved by a bounded move.  They
+    are skipped: correcting them is what used to drag healthy neighbours across
+    the body.  Every moved vertex is clamped to the travel limit.
     """
-    constraints = _surface_constraints(obj)
+    usable = [(indices, weights) for indices, weights in constraints
+              if not any(index in frozen for index in indices)]
     passes = []
     for _ in range(iterations):
         corrected = 0
+        too_deep = 0
         max_correction = 0.0
-        for indices, weights in constraints:
+        for indices, weights in usable:
             point = _sample_point(indices, weights, positions)
             _, normal, signed, _ = _nearest(bvh, point)
             if signed >= surface_clearance - tolerance:
+                continue
+            if -signed > limit:
+                too_deep += 1
                 continue
             amount = surface_clearance - signed
             denominator = sum(weight * weight for weight in weights)
             for index, weight in zip(indices, weights):
                 positions[index] += normal * (amount * weight / denominator)
+                _clamp_travel(positions, original, index, limit)
             corrected += 1
             max_correction = max(max_correction, amount)
         # A face correction can cross a nearby fold; keep all vertices outside
         # without broadening to a shrinkwrap of vertices that are already safe.
         vertices_corrected = 0
         for index, point in enumerate(positions):
+            if index in frozen:
+                continue
             location, normal, signed, _ = _nearest(bvh, point)
             if signed < -tolerance:
                 positions[index] = location + normal * surface_clearance
+                _clamp_travel(positions, original, index, limit)
                 vertices_corrected += 1
         passes.append({'corrected_samples': corrected,
                        'corrected_vertices': vertices_corrected,
+                       'skipped_too_deep_samples': too_deep,
                        'max_sample_correction_cm': max_correction})
         if not corrected and not vertices_corrected:
             break
@@ -159,23 +201,33 @@ def _project_surface_constraints(bvh, obj, positions, iterations,
 def fit_clothing_to_body(body, clothing_objects, *, clearance=.1,
                          max_displacement=3.0, penetration_tolerance=1e-4,
                          max_iterations=4, surface_iterations=0,
-                         surface_clearance=.03, dry_run=False):
+                         surface_clearance=.03, dry_run=False, strict=False,
+                         surface_constraints=None, interior_fraction=.8):
     """Project initially-inside clothing vertices just outside the body.
 
-    All proposals are computed before writing any coordinate.  A proposed move
-    beyond ``max_displacement`` or an unresolved inside vertex raises
-    :class:`FitLimitError` with a detailed report and leaves every object alone.
-    Existing shape keys beyond Basis are refused: changing only Basis would
-    silently invalidate their absolute targets.  Shared mesh datablocks are also
-    refused; pass independent export copies rather than source/reference data.
+    All proposals are computed before writing any coordinate, and no vertex
+    travels more than ``max_displacement``.  A vertex that would need more is
+    tapered or left in place (see ``_allowed_travel``) and counted in the
+    report; the rest of the garment is still repaired.  Each object reports
+    ``fully_resolved`` so callers can tell a complete fit from a partial one.
+
+    A garment whose vertices are mostly inside the body, deeper than the limit
+    (a mouthguard, an inner lining), is an interior item, not a fitting error.
+    It is reported with ``interior_item`` and left unchanged.
+
+    ``strict=True`` restores the all-or-nothing contract: any object that is
+    not fully resolved raises :class:`FitLimitError` and nothing is written.
+    Existing shape keys beyond Basis are refused here: callers that handle
+    them must fit an independent copy and transfer the offsets themselves.
+    Shared mesh datablocks are also refused.
 
     ``dry_run=True`` returns the same proposed metrics without applying them.
     With the default ``surface_iterations=0``, surface sample penetrations are
     reported without moving originally-outside vertices.  Opting into surface
     iterations permits minimal edge/centroid constraint corrections on their
-    vertices too.  This keeps topology intact and addresses coarse triangles
-    crossing the body between outside corners.  It is still a sampled rest-pose
-    check, not an animation or full continuous collision guarantee.
+    vertices too.  ``surface_constraints`` may supply a denser sampler.  This
+    is still a sampled rest-pose check, not an animation or full continuous
+    collision guarantee.
     """
     if not (0 <= clearance <= max_displacement and math.isfinite(max_displacement)
             and max_displacement > 0 and 1 <= max_iterations <= 20):
@@ -185,6 +237,7 @@ def fit_clothing_to_body(body, clothing_objects, *, clearance=.1,
     objects = list(clothing_objects)
     if not objects or len(set(objects)) != len(objects):
         raise ValueError('Pass a nonempty list of distinct clothing objects')
+    sampler = surface_constraints or _surface_constraints
     body_digest = _position_digest(body)
     bvh, body_info = _build_body_bvh(body)
     report = {'body': body.name, 'body_sha256': body_digest,
@@ -194,9 +247,7 @@ def fit_clothing_to_body(body, clothing_objects, *, clearance=.1,
               'surface_clearance_cm': surface_clearance,
               'applied': False, 'objects': []}
     proposals = []
-    limit_violations = []
-    unresolved = []
-    unresolved_surfaces = []
+    incomplete = []
     for obj in objects:
         _require_mesh(obj, 'clothing')
         if obj is body or obj.data is body.data:
@@ -208,27 +259,60 @@ def fit_clothing_to_body(body, clothing_objects, *, clearance=.1,
             raise ValueError('%s has non-Basis shape keys; fitting requires explicit target handling' % obj.name)
         original = [obj.matrix_world @ v.co for v in obj.data.vertices]
         fitted = [p.copy() for p in original]
-        inside_indices = [i for i, point in enumerate(original)
-                          if _nearest(bvh, point)[2] < -penetration_tolerance]
-        for _ in range(max_iterations):
-            remaining = 0
+        constraints = sampler(obj)
+        nearest = [_nearest(bvh, point) for point in original]
+        inside_indices = [i for i, item in enumerate(nearest)
+                          if item[2] < -penetration_tolerance]
+        depths = sorted(-nearest[i][2] for i in inside_indices)
+        before = _summary(bvh, original, penetration_tolerance)
+        samples_before = _surface_samples(bvh, constraints, original, penetration_tolerance)
+        interior = bool(original) and (
+            len(inside_indices) >= interior_fraction * len(original)
+            and depths[len(depths) // 2] > max_displacement)
+        frozen = set()
+        tapered = deep = 0
+        surface_passes = []
+        if not interior:
+            fixable = []
             for index in inside_indices:
-                location, normal, signed, _ = _nearest(bvh, fitted[index])
-                if signed < clearance - penetration_tolerance:
-                    fitted[index] = location + normal * clearance
-                    remaining += 1
-            if remaining == 0:
-                break
-        surface_passes = (_project_surface_constraints(
-            bvh, obj, fitted, surface_iterations, surface_clearance,
-            penetration_tolerance) if surface_iterations else [])
+                location, normal, signed, _ = nearest[index]
+                target = location + normal * clearance
+                travel, kind = _allowed_travel(-signed, clearance, max_displacement)
+                if kind == 'fix':
+                    fitted[index] = target
+                    fixable.append(index)
+                    continue
+                frozen.add(index)
+                if kind == 'deep':
+                    deep += 1
+                    continue
+                tapered += 1
+                offset = target - original[index]
+                if offset.length > 1e-9:
+                    fitted[index] = original[index] + offset * (travel / offset.length)
+            for _ in range(max_iterations):
+                remaining = 0
+                for index in fixable:
+                    location, normal, signed, _ = _nearest(bvh, fitted[index])
+                    if signed < clearance - penetration_tolerance:
+                        fitted[index] = location + normal * clearance
+                        _clamp_travel(fitted, original, index, max_displacement)
+                        remaining += 1
+                if remaining == 0:
+                    break
+            if surface_iterations:
+                surface_passes = _project_surface_constraints(
+                    bvh, constraints, fitted, original, frozen, surface_iterations,
+                    surface_clearance, penetration_tolerance, max_displacement)
         moved_indices = [i for i in range(len(fitted))
                          if (fitted[i] - original[i]).length > 1e-7]
         travels = [(fitted[i] - original[i]).length for i in moved_indices]
-        too_far = [int(i) for i, distance in zip(moved_indices, travels)
-                   if distance > max_displacement]
-        before = _summary(bvh, original, penetration_tolerance)
+        if max(travels, default=0.0) > max_displacement * (1 + 1e-6) + 1e-6:
+            raise RuntimeError('Internal error: a fitted vertex exceeded the travel limit')
         after = _summary(bvh, fitted, penetration_tolerance)
+        samples_after = _surface_samples(bvh, constraints, fitted, penetration_tolerance)
+        resolved = not interior and not after['inside_vertices'] and not (
+            surface_iterations and samples_after['inside_samples'])
         item = {'object': obj.name, 'mesh': obj.data.name,
                 'initially_inside_vertices': len(inside_indices),
                 'changed_vertices': len(moved_indices),
@@ -237,28 +321,22 @@ def fit_clothing_to_body(body, clothing_objects, *, clearance=.1,
                 'surface_constraint_passes': surface_passes,
                 'max_travel_cm': max(travels, default=0.0),
                 'travel_p95_cm': _percentile(travels, .95),
-                'over_limit_vertices': len(too_far),
-                'over_limit_vertex_sample': too_far[:20],
+                'tapered_vertices': tapered,
+                'deep_interior_vertices': deep,
+                'unresolved_inside_vertices': after['inside_vertices'],
+                'deepest_remaining_penetration_cm': after['deepest_penetration'],
+                'interior_item': interior,
+                'fully_resolved': resolved,
                 'before': before, 'after': after,
-                'surface_samples_before': _surface_samples(bvh, obj, original, penetration_tolerance),
-                'surface_samples_after': _surface_samples(bvh, obj, fitted, penetration_tolerance)}
+                'surface_samples_before': samples_before,
+                'surface_samples_after': samples_after}
         report['objects'].append(item)
         proposals.append((obj, moved_indices, fitted))
-        if too_far:
-            limit_violations.append(obj.name)
-        if after['inside_vertices']:
-            unresolved.append(obj.name)
-        if surface_iterations and item['surface_samples_after']['inside_samples']:
-            unresolved_surfaces.append(obj.name)
-    if limit_violations:
-        raise FitLimitError('Proposed clothing fit exceeds displacement limit: '
-                            + ', '.join(limit_violations), report)
-    if unresolved:
-        raise FitLimitError('Clothing vertices remain inside the body: '
-                            + ', '.join(unresolved), report)
-    if unresolved_surfaces:
-        raise FitLimitError('Clothing edge/face samples remain inside the body: '
-                            + ', '.join(unresolved_surfaces), report)
+        if not resolved:
+            incomplete.append(obj.name)
+    if strict and incomplete:
+        raise FitLimitError('Clothing fit is incomplete within the displacement limit: '
+                            + ', '.join(incomplete), report)
     if not dry_run:
         for obj, indices, positions in proposals:
             inverse = obj.matrix_world.inverted()

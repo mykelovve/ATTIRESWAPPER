@@ -7,7 +7,6 @@ validate animation, cloth physics or game compatibility.
 import hashlib, math, struct
 import bpy
 from mathutils import Vector
-import fit_helpers
 from fit_helpers import fit_clothing_to_body, FitLimitError
 
 
@@ -112,7 +111,11 @@ def fit_garments(body_parts, garments, *, clearance=.22, max_displacement=2,
     cap_centers optionally maps object names to explicit vertex-index lists.
     Detection applies otherwise; pass auto_detect_caps=False for open coats.
     Body parts should include both body and head, in their common rest pose.
-    Non-Basis shape keys, shared meshes and non-Object mode are refused.
+    Shared meshes and non-Object mode are refused. Shape keys are kept: every
+    key receives the same offset as Basis, so each key's shape is unchanged.
+    No vertex moves further than max_displacement; a garment that cannot be
+    fully repaired within it is still repaired where possible and reported
+    with fully_resolved False. Interior items (interior_item) are unchanged.
     Internal cap faces/spokes are excluded from exterior collision metrics.
     The original cap center offset is preserved by mean ring displacement.
     Dense surface constraints additionally check vertices, edge fifths and
@@ -130,8 +133,6 @@ def fit_garments(body_parts, garments, *, clearance=.22, max_displacement=2,
             if obj.type!='MESH' or obj.mode!='OBJECT':raise ValueError('Garment must be an Object mode mesh')
             if obj.data.users>1:raise ValueError('Garment must have independent mesh data')
             if any(obj.data is b.data for b in body_parts):raise ValueError('Garment shares body data')
-            if obj.data.shape_keys and len(obj.data.shape_keys.key_blocks)>1:
-                raise ValueError('Non-Basis shape keys require explicit target fitting')
             explicit=(cap_centers or {}).get(obj.name)
             evidence=[]
             if explicit is not None:centers=list(explicit)
@@ -148,14 +149,11 @@ def fit_garments(body_parts, garments, *, clearance=.22, max_displacement=2,
             shell=bpy.data.objects.new('_GarmentVisibleShell',mesh)
             bpy.context.scene.collection.objects.link(shell)
             try:
-                original_constraints=fit_helpers._surface_constraints
-                try:
-                    if dense_surface_samples:fit_helpers._surface_constraints=_dense_surface_constraints
-                    result=fit_clothing_to_body(collider,[shell],clearance=clearance,
-                        max_displacement=max_displacement,surface_iterations=surface_iterations,
-                        surface_clearance=surface_clearance)
-                finally:
-                    fit_helpers._surface_constraints=original_constraints
+                result=fit_clothing_to_body(collider,[shell],clearance=clearance,
+                    max_displacement=max_displacement,surface_iterations=surface_iterations,
+                    surface_clearance=surface_clearance,
+                    surface_constraints=_dense_surface_constraints if dense_surface_samples else None)
+                shell_item=result['objects'][0]
                 fitted={i:shell.data.vertices[j].co.copy() for i,j in remap.items()}
                 for center in centers:
                     ring=set()
@@ -165,23 +163,35 @@ def fit_garments(body_parts, garments, *, clearance=.22, max_displacement=2,
                     delta=sum((fitted[i]-original[i] for i in ring),Vector())/len(ring)
                     fitted[center]=original[center]+delta
                 travel=max(((fitted[i]-original[i]).length for i in fitted),default=0)
-                if travel>max_displacement:raise FitLimitError('Cap transfer exceeds displacement limit',result)
+                if travel>max_displacement*(1+1e-6)+1e-6:raise FitLimitError('Cap transfer exceeds displacement limit',result)
                 result.update({'source_object':obj.name,'source_mesh':obj.data.name,
                     'excluded_internal_cap_centers':sorted(centers),'cap_detection_evidence':evidence,
                     'max_complete_mesh_travel_cm':travel,
                     'cap_policy':'Fit visible shell; exclude cap fans/spokes; preserve center offset by mean ring displacement',
                     'dense_surface_samples':dense_surface_samples,
+                    'fully_resolved':shell_item['fully_resolved'],'interior_item':shell_item['interior_item'],
+                    'unresolved_inside_vertices':shell_item['unresolved_inside_vertices'],
+                    'unresolved_surface_samples':shell_item['surface_samples_after']['inside_samples'],
+                    'deepest_remaining_penetration_cm':max(shell_item['deepest_remaining_penetration_cm'],
+                        shell_item['surface_samples_after']['deepest_sample_penetration']),
+                    'shape_keys_offset_with_basis':bool(obj.data.shape_keys and len(obj.data.shape_keys.key_blocks)>1),
                     'applied':not dry_run,'sampled_rest_pose_only':True})
-                reports.append(result);proposals.append((obj,fitted))
+                reports.append(result);proposals.append((obj,fitted,original))
             finally:
                 bpy.data.objects.remove(shell,do_unlink=True);bpy.data.meshes.remove(mesh)
         if not dry_run:
-            for obj,fitted in proposals:
+            for obj,fitted,original in proposals:
                 inverse=obj.matrix_world.inverted()
-                basis=obj.data.shape_keys.key_blocks[0] if obj.data.shape_keys else None
+                keys=obj.data.shape_keys.key_blocks if obj.data.shape_keys else ()
                 for i,p in fitted.items():
-                    obj.data.vertices[i].co=inverse@p
-                    if basis:basis.data[i].co=inverse@p
+                    # Untouched vertices keep their exact source coordinates.
+                    if (p-original[i]).length<=1e-7:continue
+                    vertex=obj.data.vertices[i]
+                    delta=inverse@p-vertex.co
+                    vertex.co=vertex.co+delta
+                    # Shape keys store absolute positions. Offsetting every key
+                    # like Basis keeps each key's shape relative to Basis intact.
+                    for key in keys:key.data[i].co=key.data[i].co+delta
                 obj.data.update()
         assert all(_digest(o)==body_digests[o.name] for o in body_parts),'Body geometry changed'
         return {'applied':not dry_run,'body_parts':list(body_digests),'objects':reports,

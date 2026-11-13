@@ -428,7 +428,22 @@ def _fit(body_parts, bundle, enabled, report, warnings):
                 options = dict(clearance=.22, max_displacement=2,
                                surface_iterations=20, surface_clearance=.12)
             item = fit_garments(body_parts, [obj], **options)
-            fits.append({'mesh': name, 'status': 'applied', 'report': item})
+            detail = item['objects'][0]
+            if detail['interior_item']:
+                # Mouthguards and linings sit inside the body by design.
+                status = 'interior_item_unchanged'
+            elif detail['fully_resolved']:
+                status = 'applied'
+            else:
+                # Every vertex stayed within the same travel limit; the ones
+                # that would need more were left for manual review.
+                status = 'applied_partial'
+                warnings.append(
+                    'Automatic fit moved %s within its %.1f cm limit; %d vertices and %d sampled '
+                    'surface points remain inside the body (deepest %.1f cm). Inspect it.'
+                    % (name, options['max_displacement'], detail['unresolved_inside_vertices'],
+                       detail['unresolved_surface_samples'], detail['deepest_remaining_penetration_cm']))
+            fits.append({'mesh': name, 'status': status, 'report': item})
         except (FitLimitError, ValueError) as error:
             # The helper computes proposals atomically, so failed garments are
             # unchanged. A failed safe fit cannot justify larger guessed edits.
