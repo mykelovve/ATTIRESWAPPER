@@ -27,7 +27,7 @@ from urllib.parse import urlsplit
 
 
 APP_NAME = "Mykelovve Attire Swapper"
-APP_VERSION = "0.5"
+APP_VERSION = "0.5.1"
 _DLL_HANDLES = []
 _PREVIEW_LOCK = threading.Lock()
 _DLL_SEARCH_LOCK = threading.Lock()

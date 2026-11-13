@@ -453,6 +453,60 @@ def _fit(body_parts, bundle, enabled, report, warnings):
     report['fit'] = {'enabled': True, 'rest_pose_only': True, 'objects': fits}
 
 
+def _restore_base_hair_materials(job, attire, report):
+    """Ship the base attire's own .jmtl for every preserved hair material.
+
+    The exporter regenerates hair materials from a template and drops their
+    flow/root (``*_flow``, ``*_rai``) texture references, which makes hair
+    invisible or see-through in game. Preserved hair keeps the base character
+    and base attire folder names, so the original material's texture hashes
+    still resolve. Each original is used only when its shader matches the
+    generated file and every local texture it references is shipped.
+    """
+    from WWE2K_MDL.Blender.Extras.jmtl_resolver import extract_full_material_metadata
+    from merge_helpers import clean_material_name
+    source_dir = next((p for p in job['base_attire'].parent.iterdir()
+                       if p.is_dir() and p.name.casefold() == 'materials'), None)
+    output_dir = attire / 'Materials'
+    if source_dir is None or not output_dir.is_dir():
+        return []
+    hair = {clean_material_name(entry['material']).casefold()
+            for entry in report['textures']['materials'] if entry['role'] == 'base_hair'}
+    originals = {}
+    for path in source_dir.glob('*.jmtl'):
+        originals.setdefault(path.stem.casefold(), []).append(path)
+    prefix = 'Characters/%s/%s/Textures/' % (job['base_character'].name, job['base_attire'].parent.name)
+    source_textures = _texture_directory(job['base_attire'])
+    local = ({_fnv(prefix + p.stem + '.tex'): p for p in source_textures.iterdir() if p.is_file()}
+             if source_textures else {})
+    target_textures = attire / 'Textures'
+    restored = []
+    for generated_path in sorted(output_dir.glob('*.jmtl')):
+        key = generated_path.stem.casefold()
+        if key not in hair or len(originals.get(key, [])) != 1:
+            continue
+        original = originals[key][0].read_bytes()
+        generated = generated_path.read_bytes()
+        before = extract_full_material_metadata(original)
+        after = extract_full_material_metadata(generated)
+        if not before or not after or before.get('shader_byte') != after.get('shader_byte'):
+            continue
+        refs = {struct.unpack_from('<Q', original, i)[0] for i in range(len(original) - 7)}
+        textures = sorted({local[value].name for value in refs if value in local})
+        for name in textures:
+            destination = target_textures / name
+            if not destination.is_file():
+                target_textures.mkdir(parents=True, exist_ok=True)
+                shutil.copy2(source_textures / name, destination)
+            elif sha256(destination) != sha256(source_textures / name):
+                raise ValueError('Hair texture %s differs from the base attire copy' % name)
+        generated_path.write_bytes(original)
+        restored.append({'material': generated_path.name, 'source': str(originals[key][0]),
+                         'generated_bytes': len(generated), 'restored_bytes': len(original),
+                         'sha256': hashlib.sha256(original).hexdigest(), 'textures': textures})
+    return restored
+
+
 def _validate_exported_material_refs(attire, report):
     """Verify exported local primary maps resolve; reject stale known refs."""
     from WWE2K_MDL.Blender.Extras.jmtl_resolver import extract_full_material_metadata
@@ -640,6 +694,7 @@ def run(config):
             if len(candidates) != 1:
                 raise RuntimeError('Cannot identify generated MTLS library')
             candidates[0].rename(target_mtls)
+        report['restored_base_hair_materials'] = _restore_base_hair_materials(job, attire, report)
         _validate_exported_material_refs(attire, report)
         unresolved_refs = [(entry['file'], field) for entry in report['exported_materials']
                            for field, value in entry['primary_ref_resolution'].items()
@@ -647,8 +702,29 @@ def run(config):
         if unresolved_refs:
             warnings.append('Primary material maps with no copied local DDS (may be engine shared maps): %s'
                             % ', '.join('%s:%s' % item for item in unresolved_refs))
+        # The base hair is shipped unchanged, so its own YCL physics is carried
+        # over byte for byte (never edited). Clothing cages in it belong to the
+        # base attire; when the donor's clothing differs, test it in game.
+        base_ycl = [p for p in job['base_attire'].parent.iterdir() if p.is_file()
+                    and p.suffix.casefold() == '.ycl' and p.stem.casefold() == job['base_attire'].stem.casefold()]
+        ycl_copy = None
+        if len(base_ycl) == 1:
+            target_ycl = exported_mcd.with_suffix('.ycl')
+            shutil.copy2(base_ycl[0], target_ycl)
+            if sha256(target_ycl) != sha256(base_ycl[0]):
+                raise RuntimeError('Base YCL copy could not be verified')
+            ycl_copy = {'source': str(base_ycl[0]), 'file': target_ycl.name, 'sha256': sha256(target_ycl)}
+            warnings[1] = ('Base hair physics (YCL) was copied unchanged from the base attire. '
+                           'The 3D preview shows poses, not physics simulation.')
+            if job['donor_attire'] != job['base_attire']:
+                warnings.append('The copied base YCL also describes the base attire\'s own clothing; '
+                                'check donor clothing physics in game.')
+        else:
+            warnings[1] = ('The base attire has no YCL to carry over; no physics file was added. '
+                           'The 3D preview shows poses, not physics simulation.')
         data = exported_mcd.read_bytes()
         report['physics'] = {'status': 'unverified/static_draft', 'ycl_created': False,
+                             'base_ycl_copied': ycl_copy,
                              'wdf_copied': False,
                              'embedded_stream_markers_present': {tag: tag.encode('ascii') in data
                                                                 for tag in ('HYWA', 'HCYW', 'OYWA', 'OCYW')},

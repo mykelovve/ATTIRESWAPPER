@@ -6,7 +6,7 @@ Windows attire swapping and a textured 3D model viewer for WWE 2K26.
 
 Get the Windows portable ZIP from [Releases](../../releases/latest), extract it, and run the included EXE. Python is included. Viewing models does not require Blender.
 
-Current release: **v0.5 Preview**. v0.4 installs it from **Update app**. Install this ZIP once by hand if you have v0.3 or earlier; those versions cannot install updates themselves.
+Current release: **v0.5.1 Preview**. v0.4 and v0.5 install it from **Update app**. Install this ZIP once by hand if you have v0.3 or earlier; those versions cannot install updates themselves.
 
 ## Updates
 
@@ -25,6 +25,10 @@ Keep `.mdl` and `.mcd` filenames intact. v0.3 recognizes both formats and valida
 ## Viewer
 
 Drag to rotate, right-drag to pan, and scroll to zoom. Ring, Entrance, Standing, Arms up, Flex and Open mouth use the original Formatter viewer engine. Base, donor and result previews are available from the sidebar.
+
+## v0.5.1 base hair kept exactly
+
+The base model's hair now ships completely untouched. Its geometry and textures were already kept; v0.5.1 also ships the base attire's own hair material files byte for byte. Earlier versions regenerated them without their flow and root (`*_flow`, `*_rai`) texture links, which made hair (for example the back of a mullet) missing or see-through in game. The base attire's `.ycl` hair physics file is carried over unchanged when the base attire has one; otherwise no physics file is added and the log says so.
 
 ## v0.5 clothing fit
 
