@@ -231,9 +231,86 @@ def _apply_donor_hpl(job, base, donor_counts, warnings):
             result.update(applied=bool(ok), message=message, hpl_bytes=len(hpl))
             if not ok:
                 result['reason'] = message
+    return result
+
+
+def _clothing_visibility(obj):
+    """(ring, entrance) visibility from the importer's appearance flag."""
+    flag = int(getattr(getattr(obj, 'mdl_properties', None), 'appearance_flag', 128) or 128)
+    entrance_only, ring_only = bool(flag & 1), bool(flag & 2)
+    return (not entrance_only, not ring_only)
+
+
+def _generate_hpl(base, clothing, outward=2.5, inward=4.0):
+    """Hide base body vertices that the donor clothing covers, per ring/entrance.
+
+    A body vertex is covered when the clothing surface lies within ``outward``
+    cm along its outward normal, or within ``inward`` cm behind it (skin that
+    pokes through tight clothing). The mask is eroded by one vertex ring so
+    garment edges never open holes in the body. Groups go on the scene
+    reference copy only; the BaseModel files are still copied byte for byte.
+    """
+    from mathutils.bvhtree import BVHTree
+    sets = {'HPL_Ring': [], 'HPL_Entrance': []}
+    for obj in clothing:
+        if clean_mesh(obj.data.name).startswith('S_') or not obj.data.polygons:
+            continue
+        ring, entrance = _clothing_visibility(obj)
+        if ring:
+            sets['HPL_Ring'].append(obj)
+        if entrance:
+            sets['HPL_Entrance'].append(obj)
+    trees = {}
+    for name, objs in sets.items():
+        verts, tris = [], []
+        for obj in objs:
+            offset = len(verts)
+            verts.extend(obj.matrix_world @ v.co for v in obj.data.vertices)
+            obj.data.calc_loop_triangles()
+            tris.extend(tuple(offset + i for i in t.vertices) for t in obj.data.loop_triangles)
+        trees[name] = BVHTree.FromPolygons(verts, tris, all_triangles=True) if tris else None
+    result = {}
+    for body in [o for o in base['meshes'] if clean_mesh(o.data.name).casefold() in ('m_body', 'm_head')]:
+        mesh = body.data
+        normal_matrix = body.matrix_world.to_3x3().inverted().transposed()
+        points = [body.matrix_world @ v.co for v in mesh.vertices]
+        normals = [(normal_matrix @ v.normal).normalized() for v in mesh.vertices]
+        neighbors = [[] for _ in mesh.vertices]
+        for edge in mesh.edges:
+            a, b = edge.vertices
+            neighbors[a].append(b)
+            neighbors[b].append(a)
+        counts = {}
+        for name, tree in trees.items():
+            if tree is None:
+                continue
+            covered = set()
+            for i, (p, n) in enumerate(zip(points, normals)):
+                if n.length < .5:
+                    continue
+                hit = tree.ray_cast(p + n * .01, n, outward)[0]
+                if hit is None:
+                    hit = tree.ray_cast(p - n * .01, -n, inward)[0]
+                if hit is not None:
+                    covered.add(i)
+            masked = [i for i in covered if all(j in covered for j in neighbors[i])]
+            if masked:
+                group = body.vertex_groups.get(name) or body.vertex_groups.new(name=name)
+                group.add(masked, 1.0, 'REPLACE')
+            counts[name] = len(masked)
+        result[clean_mesh(mesh.name)] = {'vertices': len(points), 'masked': counts}
+    return result
+
+
+def _body_hide_masks(job, base, clothing, donor_counts, warnings):
+    """Use the donor's own HPL when it fits the base body, else generate masks."""
+    result = _apply_donor_hpl(job, base, donor_counts, warnings)
     if not result['applied']:
-        warnings.append('Body hide-masks (HPL) were not applied: %s. Skin may show through the '
-                        'clothing; inspect it.' % result['reason'])
+        result['donor_masks_skipped'] = result.pop('reason', None)
+        result['generated'] = _generate_hpl(base, clothing)
+        result['applied'] = any(sum(v['masked'].values()) for v in result['generated'].values())
+        if not result['applied']:
+            warnings.append('No body hide-masks (HPL) could be made; skin may show through the clothing.')
     return result
 
 
@@ -709,7 +786,7 @@ def run(config):
             for group in list(obj.vertex_groups):
                 if group.name.startswith('HPL_'):
                     obj.vertex_groups.remove(group)
-        report['body_hide_masks'] = _apply_donor_hpl(job, base, donor_body_counts, warnings)
+        report['body_hide_masks'] = _body_hide_masks(job, base, bundle['clothing'], donor_body_counts, warnings)
         character = stage / 'Characters' / job['base_character'].name
         attire = character / job['base_attire'].parent.name
         attire.mkdir(parents=True)
