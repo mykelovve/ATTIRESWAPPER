@@ -1,0 +1,30 @@
+name: Publish portable release
+
+on:
+  workflow_dispatch:
+    inputs:
+      release_tag:
+        description: Stable release tag
+        required: true
+        default: v0.3.0
+      artifact_ref:
+        description: Temporary verified artifact branch
+        required: true
+        default: release-input/v0.3.0
+
+permissions:
+  contents: write
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Validate and publish the prebuilt package
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ inputs.release_tag }}
+          ARTIFACT_REF: ${{ inputs.artifact_ref }}
+        run: python3 tools/publish_prebuilt.py
