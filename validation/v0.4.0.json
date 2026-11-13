@@ -1,0 +1,80 @@
+{
+  "application": "Mykelovve Attire Swapper",
+  "version": "0.4.0",
+  "executable": "Mykelovve_Attire_Swapper_v0.4.exe",
+  "executable_bytes": 83240087,
+  "executable_sha256": "50a0f4d29178ccd3a83701d9097ac8d5905785fafff42ed4a4d7bccd2891d166",
+  "update_repository": "https://github.com/mykelovve/ATTIRESWAPPER",
+  "update_API": "https://api.github.com/repos/mykelovve/ATTIRESWAPPER/releases/latest",
+  "changes": [
+    "Update app checks the pinned public GitHub repository in the background, downloads and verifies the portable ZIP internally, then installs and restarts without opening a website.",
+    "The copied frozen installer acknowledges readiness before the app closes, waits for the old process, keeps a verified backup, replaces the EXE atomically and rolls back if startup health fails.",
+    "Preview resolves unique local material/color DDS files when a renamed character folder invalidates original path hashes; original game files and valid references are preserved.",
+    "Preview diagnostics distinguish unresolved body/head images from already-resolved material bindings.",
+    "The original Formatter theme, viewer and v0.3 MCD/MDL folder loading and swap pipeline are retained."
+  ],
+  "checks": {
+    "frozen_runtime_and_bundled_resources": true,
+    "frozen_real_Formatter_Tk_controls": true,
+    "both_Update_buttons_use_internal_API_no_browser": true,
+    "update_check_does_not_clear_model_worker_busy": true,
+    "updater_transaction_and_rejection_cases": 22,
+    "actual_public_release_metadata_checksum_download_and_PE_staging": true,
+    "actual_frozen_installer_ready_image_lock_retry_atomic_replace_GUI_relaunch_health": true,
+    "failed_launch_and_unhealthy_app_rollback": true,
+    "real_frozen_renamed_MCD_and_MDL_previews": true,
+    "body_and_head_PNGs_match_actual_user_same_source_DDS": true,
+    "ambiguous_missing_traversal_or_unrelated_local_material_assets_rejected": true,
+    "original_503_renderer_theme_modules_preserved": true,
+    "all_other_archive_resources_preserved": true,
+    "v03_model_layout_and_native_swap_worker_exact": true,
+    "all_frozen_sources_match_current_snapshot": true,
+    "source_models_textures_preferences_unchanged": true
+  },
+  "viewer": {
+    "MCD_embedded_PNGs": 19,
+    "MDL_embedded_PNGs": 19,
+    "controls": {
+      "Standing": true,
+      "Arms up": true,
+      "Flex": true,
+      "Open mouth": true,
+      "Ring": true,
+      "Entrance": true
+    },
+    "original_engine_preserved": true
+  },
+  "limitations": [
+    "v0.3 and earlier open a website for updates; install v0.4 manually once to enable the new in-app updater.",
+    "Real frozen installer/Tk/native-reader checks ran under Wine with the native UCRT compatibility fallback; native Windows interactive visual testing was not repeated.",
+    "The live helper protocol used disposable v0.4 executable copies with a declared older version; rollback with different old/new file contents was checked in real file transactions with injected process outcomes.",
+    "Native model loading and swap worker are byte-identical to the separately validated v0.3 release; the full Blender worker was not rerun without a worker change.",
+    "Resolved textures do not imply full game shader or tint fidelity. The Speedball reference robe/headband fitting question requires its actual source assets.",
+    "Automatic swaps remain review drafts; live hair/cloth physics and character-specific fit corrections require separate model work and game tests."
+  ],
+  "evidence_sha256": {
+    "build-001/ARCHIVE_PRESERVATION.json": "459ed7d5709bbd3eb8a4ab828bed003906ae8abbb273fadcfa66b3ff8c3b7a23",
+    "build-001/SOURCE_FREEZE.json": "a277d639c5d70a5d91cd206a4e831ad07a987c78280eceece5a4220024af3068",
+    "build-001/runtime-self-test.json": "110e56e036798f76af7891e1836bbc24abe219ec528e45d42f2931d45ec9ce6b",
+    "build-001/tk-ui-self-test.json": "0811d8a0ed5941f329deaa3b7c192b4f139989ee18973003710f1e5d3e5bc5fc",
+    "tests/FROZEN_TEXTURE_WORKFLOW_PROOF.json": "ae80cfce7c26cf8f637fdfb4ba358d3e9663dc1925c0aadce88893c382edd56a",
+    "tests/updater-source-tests.json": "a86e7c7f290cca31929e52a3d9bf6704ea354ae4abe6719cabd57f6d274e73b9",
+    "tests/PUBLIC_RELEASE_DOWNLOAD.json": "82e8db8a83200bc18c8258778536175e33ccb43cfdb9253b077ebebde3fa84dc",
+    "tests/LIVE_FROZEN_HELPER.json": "42befadf8eacc106baddc1250ae3cb465d501b12e0c2849e9f3525e2e683a94a",
+    "tests/MATERIAL_SCOPE_PROOF.json": "15cbf7fa569d10a6b1f1f57dae312e8fc75a3e238e8799a66053f6715d5a32c7"
+  },
+  "portable_zip": "Mykelovve_Attire_Swapper_v0.4_Portable.zip",
+  "portable_zip_bytes": 81887047,
+  "portable_zip_sha256": "68d1e9a4732e4aa05fe3f276d0b5811adfef2c383608363e26bc9c672c631cac",
+  "source_sha256": {
+    "Source/app_updater.py": "fd2a448348cb9838b0128222d597bfb7c9ff310f6c20878710494d681a5d596d",
+    "Source/attire_swapper_gui.py": "f5da34239d9c6373976597315b9703bcfb0271550f0aa767009f747ac1a0d257",
+    "Source/fit_helpers.py": "ceeaab926ab3819994b7d529dbdd9885bb39ea7cdd0c77de5e014087c2be471d",
+    "Source/garment_fit.py": "c3ddb4fd381468378c9f6f0832f91bc9c04e989613de7a86d5d1b1279bb10336",
+    "Source/merge_helpers.py": "04425183e73ade5099709ce4b4f13a4a6b5c8269057b5ab322de820d77895eed",
+    "Source/model_layout.py": "3714168702ae0c14bc6d5198b2c5ef6c213ed10cdd0cd28c45d53e6ae7b5053b",
+    "Source/swap_job.py": "c50bcef694144557ed4b174cf81a447963cce439f7f032ff58f19608f5d27110",
+    "Source/swap_worker.py": "5ad1ea96065022de9f374e27a669a60e3d9382ae519c648441002fdab3481669",
+    "Source/ui_texture_preview.py": "94d04d5e7e39440d07b53f92daff95ff51f6e207a98873d51768db7d9d3eb809"
+  }
+}

@@ -27,8 +27,7 @@ from urllib.parse import urlsplit
 
 
 APP_NAME = "Mykelovve Attire Swapper"
-APP_VERSION = "0.3"
-UPDATE_PAGE_URL = "https://mykelovve-model-previews-1111.dewycoot20.chatgpt.site/updates/?current=" + APP_VERSION
+APP_VERSION = "0.4"
 _DLL_HANDLES = []
 _PREVIEW_LOCK = threading.Lock()
 _DLL_SEARCH_LOCK = threading.Lock()
@@ -277,6 +276,8 @@ class AttireSwapperApp:
         self.tk, self.ttk, self.root = tk, ttk, root
         self.events = queue.Queue()
         self.busy = False
+        self.update_busy = False
+        self.pending_update = None
         self.process = None
         self.host = None
         self.last_result = None
@@ -405,7 +406,8 @@ class AttireSwapperApp:
         tk.Canvas.configure(self.update_button, takefocus=1)
         self.update_button.bind("<Return>", lambda _: self.update_button.invoke())
         self.update_button.bind("<space>", lambda _: self.update_button.invoke())
-        self._label(update, "Private app updates", muted=True, font=("Segoe UI", 8)).pack(anchor="e", pady=(4, 0))
+        self.update_status = self._label(update, "Updates install here", muted=True, font=("Segoe UI", 8))
+        self.update_status.pack(anchor="e", pady=(4, 0))
 
         workspace = self._card(main)
         workspace.grid(row=1, column=0, sticky="ew")
@@ -558,12 +560,67 @@ class AttireSwapperApp:
             self.repair_button.configure(text="Repair options")
 
     def _open_updates(self):
+        """Check, download and install within the app; never open a website."""
+        if self.update_busy:
+            self._log("An update check or download is already running.")
+            return
+        if self.pending_update is not None:
+            self._install_update()
+            return
+        self.update_busy = True
+        self.update_status.configure(text="Checking GitHub…")
+        self._log("Checking the official Attire Swapper release…")
+        def work():
+            try:
+                from app_updater import check_release, stage_release, cleanup_completed_stages
+                cleanup_completed_stages(_configuration_dir() / "updates", APP_VERSION)
+                release = check_release(APP_VERSION)
+                if release is None:
+                    self.events.put(("update_current", None))
+                    return
+                self.events.put(("log", "Downloading v" + release.version + "; the SHA256 checksum will be verified before installation."))
+                previous_percent = -1
+                def progress(received, total):
+                    nonlocal previous_percent
+                    percent = int(received * 100 / total)
+                    if percent != previous_percent:
+                        previous_percent = percent
+                        self.events.put(("update_progress", percent))
+                staged = stage_release(release, _configuration_dir() / "updates", progress=progress)
+                self.events.put(("update_ready", staged))
+            except Exception as error:
+                self.events.put(("update_error", str(error)))
+        threading.Thread(target=work, name="app-update", daemon=True).start()
+
+    def _install_update(self):
+        if self.busy:
+            self.update_status.configure(text="Ready after current task")
+            self._log("The verified update is ready. Finish the current task, then click Update app to install and restart.")
+            return False
         try:
-            if not webbrowser.open(UPDATE_PAGE_URL):
-                raise RuntimeError("No browser could be opened. Set a default browser and try Update app again.")
-            self._log("Opened the private app update page for v" + APP_VERSION + ". Sign in there to view the latest ZIP.")
+            if not getattr(sys, "frozen", False):
+                self.update_status.configure(text="Verified update staged")
+                self._log("Development mode: the update was verified and staged at " + self.pending_update["stage"] + ". Run the portable Windows EXE to install updates in place.")
+                return False
+            from app_updater import prepare_install, launch_installer, wait_installer_ready
+            self._save_preferences()
+            config = prepare_install(self.pending_update, sys.executable, APP_VERSION)
+            installer = launch_installer(config)
+            self.update_busy = True
+            self._set_busy(True, "Preparing update restart…")
+            self.update_status.configure(text="Preparing update restart…")
+            def await_installer():
+                try:
+                    wait_installer_ready(config, installer)
+                    self.events.put(("update_installer_ready", None))
+                except Exception as error:
+                    self.events.put(("update_installer_error", str(error)))
+            threading.Thread(target=await_installer, name="update-installer-start", daemon=True).start()
+            return False
         except Exception as error:
-            self._error("Could not open app updates", error)
+            self.update_status.configure(text="Update could not install")
+            self._error("Could not install app update", error)
+            return False
 
     def _log(self, text):
         self.log.configure(state="normal")
@@ -814,6 +871,32 @@ class AttireSwapperApp:
                     self._error(*value)
                 elif kind == "idle":
                     self._set_busy(False, "Ready · draft created; inspect the 3D result." if self.last_result else "Ready")
+                elif kind == "update_progress":
+                    self.update_status.configure(text="Downloading update · %d%%" % value)
+                elif kind == "update_current":
+                    self.update_busy = False
+                    self.update_status.configure(text="You have the latest version")
+                    self._log("Attire Swapper v" + APP_VERSION + " is up to date.")
+                elif kind == "update_ready":
+                    self.update_busy = False
+                    self.pending_update = value
+                    self.update_status.configure(text="Update verified · restarting…")
+                    if self._install_update():
+                        return
+                elif kind == "update_error":
+                    self.update_busy = False
+                    self.update_status.configure(text="Update check failed · retry")
+                    self._error("Could not update app", value)
+                elif kind == "update_installer_ready":
+                    if self.host is not None:
+                        self.host.close()
+                    self.root.destroy()
+                    return
+                elif kind == "update_installer_error":
+                    self.update_busy = False
+                    self._set_busy(False, "Current app is still running · update did not install")
+                    self.update_status.configure(text="Installer failed · retry")
+                    self._error("Could not start app update", value)
         except queue.Empty:
             pass
         self.root.after(100, self._poll)
@@ -885,11 +968,16 @@ def self_test() -> dict:
 
 
 def main(argv=None):
+    arguments = list(sys.argv[1:] if argv is None else argv)
+    launch_health = None
+    if len(arguments) == 3 and arguments[0] == "--updated-launch":
+        launch_health = arguments[1:]
+        arguments = []
     parser = argparse.ArgumentParser(description=APP_NAME)
     parser.add_argument("--self-test", action="store_true", help="check bundled resources without opening a window")
     parser.add_argument("--build-preview", nargs=3, metavar=("CHARACTER", "ATTIRE", "OUTPUT"), help="build using the original preview engine")
     parser.add_argument("--report", type=Path, help="write the command result as JSON")
-    args = parser.parse_args(argv)
+    args = parser.parse_args(arguments)
     if args.self_test or args.build_preview:
         try:
             if args.self_test:
@@ -919,6 +1007,9 @@ def main(argv=None):
             pass
     root = tk.Tk()
     AttireSwapperApp(root)
+    if launch_health:
+        from app_updater import write_launch_health
+        root.after_idle(lambda: write_launch_health(*launch_health, APP_VERSION))
     root.mainloop()
     return 0
 

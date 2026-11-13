@@ -6,7 +6,11 @@ Windows attire swapping and a textured 3D model viewer for WWE 2K26.
 
 Get the Windows portable ZIP from [Releases](../../releases/latest), extract it, and run the included EXE. Python is included. Viewing models does not require Blender.
 
-Current release: **v0.3 Preview**.
+Current release: **v0.4 Preview**. Install this ZIP once if you have v0.3 or earlier; those versions cannot install the new updater themselves.
+
+## Updates
+
+Both **Update app** buttons now check this repository, download and verify the latest stable portable ZIP, then install and restart inside the app. Keep the EXE in a writable folder. The installer waits for running model work, preserves preferences and model folders, and keeps a previous-EXE backup with rollback if startup fails. No website or separate Python is needed.
 
 ## Choose your models
 
@@ -22,7 +26,13 @@ Keep `.mdl` and `.mcd` filenames intact. v0.3 recognizes both formats and valida
 
 Drag to rotate, right-drag to pan, and scroll to zoom. Ring, Entrance, Standing, Arms up, Flex and Open mouth use the original Formatter viewer engine. Base, donor and result previews are available from the sidebar.
 
-## v0.3 loading fixes
+## v0.4 preview fixes
+
+When a renamed character folder breaks stored material paths, the viewer resolves unique local material and color DDS files. This restores body and head images for the tested packs while preserving the source game files. Missing or ambiguous images are reported. Preview shading can still differ from the game.
+
+The frozen application passed both Update button callbacks without opening a browser, 22 updater transaction and rejection cases, an actual public release download, and installer/relaunch/health checks. MCD and MDL previews each embedded 19 PNGs; body and head images matched their source DDS files. The original 503 renderer/theme modules and the v0.3 model loader and swap worker are preserved. See `validation/v0.4.0.json` for evidence and testing limits. Windows runtime checks ran under Wine; native Windows visual testing was not repeated.
+
+## Retained v0.3 loading fixes
 
 - MCD and bare MDL recognition, including case-insensitive filenames.
 - Nested pack and inner-folder discovery.

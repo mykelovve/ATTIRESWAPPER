@@ -90,12 +90,139 @@ def _fallback_picture(path, alpha=False):
     return "data:image/png;base64," + base64.b64encode(png).decode("ascii")
 
 
+def _unique_child(directory, name, directory_only=False):
+    try:
+        matches = [p for p in Path(directory).iterdir()
+                   if p.name.casefold() == name.casefold() and not p.is_symlink()
+                   and (p.is_dir() if directory_only else p.is_file())]
+    except OSError:
+        return None, 0
+    return matches[0] if len(matches) == 1 else None, len(matches)
+
+
+def _install_material_relative_pictures(preview):
+    """Resolve renamed-pack links in memory, never repair source/game files.
+
+    MTLS/JMTL references contain the old character path's hashes in many ports.
+    An exact same-scope material and a unique, explicitly named color DDS are
+    usable for display even when that path no longer matches the folder name.
+    Existing valid links win. Ambiguous/missing assets remain unresolved.
+    """
+    original = preview.material_pictures
+    if getattr(original, '_mykelovve_material_relative', False):
+        return
+
+    def pictures(model_path, tex_index, mat_index):
+        result = original(model_path, tex_index, mat_index)
+        scope = Path(model_path).parent
+        material_dir, material_count = _unique_child(scope, 'Materials', True)
+        texture_dir, texture_count = _unique_child(scope, 'Textures', True)
+        sidecar, _ = _unique_child(scope, Path(model_path).stem + '.mtls')
+        names = []
+        if sidecar:
+            try:
+                names = [str(name) for name, _ in preview.read_mtls(str(sidecar))]
+            except (OSError, ValueError, struct.error, IndexError):
+                pass
+        if not names and material_dir:
+            names = [p.stem for p in material_dir.iterdir()
+                     if p.is_file() and p.suffix.casefold() == '.jmtl']
+        for name in dict.fromkeys(names):
+            key = name.casefold()
+            # MTLS names are data, not paths. Do not allow a material to escape
+            # its own selected model scope or borrow another character's DDS.
+            if not name or any(c in name for c in '/\\:') or name in ('.', '..'):
+                continue
+            current = result.get(key)
+            if current and current.get('file') and Path(current['file']).is_file():
+                _diagnostics.append({'kind': 'material_binding', 'model': str(model_path),
+                                     'material': name, 'status': 'resolved', 'preview_only': True,
+                                     'path': str(current['file']), 'shader': current.get('shader'),
+                                     'declared_color_ref': current.get('color'),
+                                     'declared_combo_ref': current.get('combo'),
+                                     'method': 'existing declared material and texture links'})
+                continue
+            required = scope.name.casefold() == 'basemodel' and key in ('body', 'head')
+            event = {'kind': 'material_binding', 'model': str(model_path), 'material': name,
+                     'status': 'unresolved', 'preview_only': True}
+            if material_count != 1 or material_dir is None:
+                if required:
+                    _diagnostics.append(dict(event, error='Local Materials folder is missing or ambiguous'))
+                continue
+            material, count = _unique_child(material_dir, name + '.jmtl')
+            if count != 1 or material is None:
+                if required or count > 1:
+                    _diagnostics.append(dict(event, error='Local material file is missing or ambiguous'))
+                continue
+            try:
+                info = dict(preview.read_jmtl(str(material)))
+            except (OSError, ValueError, struct.error, IndexError):
+                if required:
+                    _diagnostics.append(dict(event, error='Local material file could not be read'))
+                continue
+            is_hair = info.get('shader') == preview.HAIR_SHADER and not info.get('npc')
+            link = info.get('combo') if is_hair else info.get('color')
+            direct = tex_index.get(link)
+            method = 'local material with its declared texture hash'
+            if direct and Path(direct).is_file():
+                texture = Path(direct)
+            else:
+                texture = None
+                if texture_count != 1 or texture_dir is None:
+                    if required:
+                        _diagnostics.append(dict(event, error='Local Textures folder is missing or ambiguous'))
+                    continue
+                stem = key[:-6] if is_hair and key.endswith('_alpha') else key
+                stems = [stem + ('_rai' if is_hair else '_color')]
+                if key in ('eye_l', 'eye_r'):
+                    stems.append('eye_color')
+                # A no-link software/default material is intentional unless it
+                # is the explicit body/head material with its local color DDS.
+                if link in (None,) + tuple(preview.NO_LINK) and not required:
+                    continue
+                problem = None
+                for wanted in stems:
+                    choices = [p for p in texture_dir.iterdir()
+                               if p.is_file() and not p.is_symlink()
+                               and p.suffix.casefold() == '.dds' and p.stem.casefold() == wanted]
+                    if len(choices) > 1:
+                        problem = 'More than one matching local color DDS'; break
+                    if len(choices) == 1:
+                        candidate = choices[0]
+                        try:
+                            with candidate.open('rb') as handle:
+                                valid = handle.read(4) == b'DDS '
+                        except OSError:
+                            valid = False
+                        if valid:
+                            texture = candidate
+                        else:
+                            problem = 'Matching local picture is not a readable DDS'
+                        break
+                if texture is None:
+                    if required or problem:
+                        _diagnostics.append(dict(event, error=problem or 'Matching local color DDS is missing'))
+                    continue
+                method = 'unique material-relative DDS in the same model scope'
+            info.update(file=str(texture), where='mod')
+            result[key] = info
+            _diagnostics.append(dict(event, status='recovered', path=str(texture), jmtl=str(material),
+                                     declared_ref=link, shader=info.get('shader'), method=method))
+        return result
+
+    pictures._mykelovve_material_relative = True
+    pictures._mykelovve_original = original
+    preview.material_pictures = pictures
+
+
 def install(renderer=None):
     """Install before renderer() or build(); safe to call repeatedly."""
     if renderer is None:
         import gmf_preview as renderer
     original = renderer._decode_picture
     if getattr(original, "_mykelovve_resize_fallback", False):
+        preview, _ = renderer.renderer()
+        _install_material_relative_pictures(preview)
         return renderer
 
     def decode_picture(path, alpha=False):
@@ -115,6 +242,8 @@ def install(renderer=None):
 
     decode_picture._mykelovve_resize_fallback = True
     renderer._decode_picture = decode_picture
+    preview, _ = renderer.renderer()
+    _install_material_relative_pictures(preview)
     # The shipped version has no picture cache, but clear one if a future private
     # runtime adds it so a previously cached None cannot survive installation.
     page = sys.modules.get("gmf.preview_page")
@@ -202,20 +331,31 @@ def inspect_preview(path):
                     missing.append(row)
                 if group.get("kind") in ("lash", "cut", "see"):
                     missing_alpha.append(row)
-    decoder_failures = [event for event in diagnostics() if event.get("status") == "failed"]
+    events = diagnostics()
+    binding_events = [event for event in events if event.get("kind") == "material_binding"]
+    missing_skin = [row for row in fallbacks if str(row.get('material')).casefold() in ('body', 'head')]
+    binding_failures = [event for event in binding_events if event.get('status') == 'unresolved'
+                        and any(str(row.get('material')).casefold() == str(event.get('material')).casefold()
+                                for row in fallbacks)]
+    decoder_failures = [event for event in events if event.get("status") == "failed"]
     return {"embedded_pngs": len(textures), "textures": textures, "invalid_textures": invalid,
             "textured_groups": textured, "missing_mod_pictures": missing, "fallback_groups": fallbacks,
             "missing_alpha_pictures": missing_alpha,
-            "decoder_events": diagnostics(), "decoder_failures": decoder_failures,
-            "payload_valid": not invalid and not missing and not missing_alpha and not decoder_failures}
+            "material_binding_events": binding_events, "material_binding_failures": binding_failures,
+            "missing_skin_pictures": missing_skin,
+            "decoder_events": events, "decoder_failures": decoder_failures,
+            "payload_valid": not invalid and not missing and not missing_alpha and not missing_skin
+                             and not binding_failures and not decoder_failures}
 
 
 def annotate_failures(path, report):
     """Show incomplete picture embedding in the page instead of silently gray."""
-    failures = report.get("missing_mod_pictures", []) + report.get("missing_alpha_pictures", [])
+    failures = (report.get("missing_mod_pictures", []) + report.get("missing_alpha_pictures", [])
+                + report.get("missing_skin_pictures", []))
     invalid = report.get("invalid_textures", [])
     decode_failures = report.get("decoder_failures", [])
-    if not failures and not invalid and not decode_failures:
+    binding_failures = report.get("material_binding_failures", [])
+    if not failures and not invalid and not decode_failures and not binding_failures:
         return
     materials = ", ".join(sorted({str(item.get("material")) for item in failures}))
     message = "Some preview pictures could not be embedded"
@@ -225,6 +365,8 @@ def annotate_failures(path, report):
         message += ". %d embedded image error(s)." % len(invalid)
     if decode_failures:
         message += ". %d texture decode failure(s); see the application log." % len(decode_failures)
+    if binding_failures:
+        message += ". Local color pictures are missing or ambiguous; see the application log."
     warning = '<p style="color:#ffc94a;font-weight:600">' + html.escape(message) + "</p>"
     target = Path(path)
     target.write_text(target.read_text(encoding="utf-8").replace('<div id="foot">', '<div id="foot">' + warning, 1), encoding="utf-8")
