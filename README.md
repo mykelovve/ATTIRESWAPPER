@@ -6,7 +6,7 @@ Windows attire swapping and a textured 3D model viewer for WWE 2K26.
 
 Get the Windows portable ZIP from [Releases](../../releases/latest), extract it, and run the included EXE. Python is included. Viewing models does not require Blender.
 
-Current release: **v0.5.3 Preview**. v0.4 and later install it from **Update app**. Install this ZIP once by hand if you have v0.3 or earlier; those versions cannot install updates themselves.
+Current release: **v0.5.4 Preview**. v0.4 and later install it from **Update app**. Install this ZIP once by hand if you have v0.3 or earlier; those versions cannot install updates themselves.
 
 ## Updates
 
@@ -25,6 +25,14 @@ Keep `.mdl` and `.mcd` filenames intact. v0.3 recognizes both formats and valida
 ## Viewer
 
 Drag to rotate, right-drag to pan, and scroll to zoom. Ring, Entrance, Standing, Arms up, Flex and Open mouth use the original Formatter viewer engine. Base, donor and result previews are available from the sidebar.
+
+## v0.5.4 Check model, no donor beards
+
+**Check model** (sidebar): **Check base**, **Check donor**, **Check result** and **Check any model** examine a model in Blender and list findings in plain words: hair and beard meshes, hair materials missing their texture links, the `.ycl` physics file and its cages, skin showing through the clothing, and hide-mask holes. A finished swap is checked automatically, and the check also confirms the base body and hair were not changed.
+
+- A donor's beard (`M_Combinations` and other facial-hair meshes) is no longer added on top of the base face.
+- A donor physics cage that the outgoing `.ycl` does not drive (it would show as a black band, for example around an arm) is left out.
+- Every body hide-mask, including a donor's own, is double-checked so it never opens a hole; fabric on the far side of a thin limb no longer counts as covering skin.
 
 ## v0.5.3 fixes
 

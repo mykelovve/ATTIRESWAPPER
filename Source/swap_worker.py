@@ -244,6 +244,31 @@ def _clothing_visibility(obj):
     return (not entrance_only, not ring_only)
 
 
+def _fabric_behind(tree, occluder, p, n, limit=4.0):
+    """True when clothing lies just behind skin point ``p`` (inward along -n)
+    before the ray leaves the body. Fabric on the far side of a thin limb
+    does not count: that skin is not poking through anything."""
+    hit = tree.ray_cast(p - n * .01, -n, limit)
+    if hit[0] is None:
+        return False
+    far_side = occluder.ray_cast(p - n * .05, -n, limit) if occluder is not None else (None, None, None, None)
+    return far_side[0] is None or hit[3] < far_side[3]
+
+
+def _skin_poking_out(tree, occluder, p, n, poke=15.0):
+    """Skin straight out from a same-facing clothing surface that sits inside the body."""
+    if _fabric_behind(tree, occluder, p, n):
+        return True
+    location, face_normal, _, distance = tree.find_nearest(p, poke)
+    if location is None or face_normal is None or distance <= 1e-4:
+        return False
+    if face_normal.dot(n) <= .5 or ((p - location) / distance).dot(face_normal) <= .9:
+        return False
+    # The fabric must be inside this body part, not across a gap or limb.
+    far_side = occluder.ray_cast(p - n * .05, -n, distance + 1.0) if occluder is not None else (None, None, None, None)
+    return far_side[0] is None
+
+
 def _view_directions(n, tangent, other):
     """49 outward view directions: the normal plus three rings at 30, 60 and 85 degrees."""
     import math
@@ -327,21 +352,14 @@ def _generate_hpl(base, clothing, outward=2.5, inward=4.0, poke=15.0, island_lim
                     if angled < 3:
                         hit = None
                 if hit is None:
-                    hit = tree.ray_cast(p - n * .01, -n, inward)[0]
-                    if hit is not None:
+                    if _fabric_behind(tree, occluder, p, n, inward) or (
+                            is_body and _skin_poking_out(tree, occluder, p, n, poke)):
+                        hit = p
                         poked.add(i)
-                if hit is None and is_body:
-                    # Skin poking out through deep clothing: it must sit straight
-                    # out from a same-facing clothing surface, not past its edge.
-                    location, face_normal, _, distance = tree.find_nearest(p, poke)
-                    if location is not None and face_normal is not None and distance > 1e-4:
-                        offset = (p - location) / distance
-                        if face_normal.dot(n) > .5 and offset.dot(face_normal) > .9:
-                            hit = location
-                            poked.add(i)
                 if hit is not None:
                     covered.add(i)
-            masked = {i for i in covered if all(j in covered for j in neighbors[i])}
+            # Edge trim never unmasks skin that pokes out with fabric right behind it.
+            masked = {i for i in covered if i in poked or all(j in covered for j in neighbors[i])}
             # Close pinholes: an unmasked vertex almost surrounded by masked ones.
             for _ in range(2):
                 masked |= {i for i in range(len(points)) if i not in masked and len(neighbors[i]) >= 3
@@ -406,15 +424,70 @@ def _generate_hpl(base, clothing, outward=2.5, inward=4.0, poke=15.0, island_lim
     return result
 
 
+def _prune_visible_masks(base, clothing):
+    """Un-hide every masked body point that can be seen from outside.
+
+    Applies to all masks, including a donor's own, so no mask opens a hole.
+    Skin with clothing right behind it (poking through) stays hidden.
+    """
+    bodies = [o for o in base['meshes'] if clean_mesh(o.data.name).casefold() in ('m_body', 'm_head')]
+    from mathutils.bvhtree import BVHTree
+
+    def tree(objects):
+        verts, tris = [], []
+        for obj in objects:
+            offset = len(verts)
+            verts.extend(obj.matrix_world @ v.co for v in obj.data.vertices)
+            obj.data.calc_loop_triangles()
+            tris.extend(tuple(offset + i for i in t.vertices) for t in obj.data.loop_triangles)
+        return BVHTree.FromPolygons(verts, tris, all_triangles=True) if tris else None
+
+    occluder = tree(bodies)
+    pruned = {}
+    for mode, side in (('HPL_Ring', 0), ('HPL_Entrance', 1)):
+        cloth = tree([o for o in clothing if not clean_mesh(o.data.name).startswith('S_') and o.data.polygons
+                      and _clothing_visibility(o)[side]])
+        for body in bodies:
+            group = body.vertex_groups.get(mode)
+            if group is None:
+                continue
+            members = [v.index for v in body.data.vertices if any(g.group == group.index for g in v.groups)]
+            normal_matrix = body.matrix_world.to_3x3().inverted().transposed()
+            drop = []
+            for i in members:
+                vertex = body.data.vertices[i]
+                p = body.matrix_world @ vertex.co
+                n = (normal_matrix @ vertex.normal).normalized()
+                if n.length < .5:
+                    continue
+                if cloth is not None and _skin_poking_out(cloth, occluder, p, n):
+                    continue
+                tangent = n.orthogonal().normalized()
+                other = n.cross(tangent)
+                start = p + n * .05
+                for direction in _view_directions(n, tangent, other):
+                    if ((cloth is None or cloth.ray_cast(start, direction, 60.0)[0] is None)
+                            and occluder.ray_cast(start, direction, 60.0)[0] is None):
+                        drop.append(i)
+                        break
+            if drop:
+                group.remove(drop)
+            pruned['%s %s' % (clean_mesh(body.data.name), mode)] = len(drop)
+    return pruned
+
+
 def _body_hide_masks(job, base, clothing, donor_counts, warnings):
-    """Use the donor's own HPL when it fits the base body, else generate masks."""
+    """Combine the donor's own HPL (when it fits) with generated masks, then
+    double-check every masked point so no mask opens a hole."""
     result = _apply_donor_hpl(job, base, donor_counts, warnings)
     if not result['applied']:
         result['donor_masks_skipped'] = result.pop('reason', None)
-        result['generated'] = _generate_hpl(base, clothing)
-        result['applied'] = any(sum(v['masked'].values()) for v in result['generated'].values())
-        if not result['applied']:
-            warnings.append('No body hide-masks (HPL) could be made; skin may show through the clothing.')
+    result['generated'] = _generate_hpl(base, clothing)
+    result['visible_points_unhidden'] = _prune_visible_masks(base, clothing)
+    result['applied'] = any(len([v for v in o.data.vertices if v.groups]) for o in base['meshes']
+                            if any(g.name.startswith('HPL_') for g in o.vertex_groups))
+    if not result['applied']:
+        warnings.append('No body hide-masks (HPL) could be made; skin may show through the clothing.')
         body_check = (result['generated'].get('M_Body') or {}).get('double_check', {})
         hidden = max((c['enclosed_spots_hidden'] for c in body_check.values()), default=0)
         visible = max((c['openings_left_visible'] for c in body_check.values()), default=0)
@@ -922,6 +995,22 @@ def run(config):
             bpy.context.scene.vcmodel_physics_swap.enabled = False
             report['physics_template'] = {'enabled': False, 'reason': 'Complete donor hair sidecars unavailable'}
             warnings.append('Donor hair template sidecars were unavailable; no hair solver retarget was attempted.')
+        base_ycl_files = [p for p in job['base_attire'].parent.iterdir() if p.is_file()
+                          and p.suffix.casefold() == '.ycl' and p.stem.casefold() == job['base_attire'].stem.casefold()]
+        driven = ({m.decode() for m in re.findall(rb'S_[A-Za-z0-9_]+', base_ycl_files[0].read_bytes())}
+                  if len(base_ycl_files) == 1 else set())
+        dropped = []
+        for obj in list(bundle['clothing']):
+            cage = clean_mesh(obj.data.name)
+            if cage.startswith('S_') and cage not in driven:
+                bundle['clothing'].remove(obj)
+                bundle['meshes'].remove(obj)
+                dropped.append(cage)
+                bpy.data.objects.remove(obj, do_unlink=True)
+        report['dropped_undriven_cages'] = dropped
+        if dropped:
+            warnings.append('Left out donor physics cage(s) %s: the outgoing .ycl does not drive them, so they '
+                            'would show as black meshes in game. That clothing is static.' % ', '.join(dropped))
         report['export_validation'] = mh.validate_export_bundle(bundle)
         progress(.74, 'Exporting WWE 2K26 draft')
         mh.select_export_bundle(bundle)

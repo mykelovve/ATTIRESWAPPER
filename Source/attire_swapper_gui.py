@@ -27,7 +27,7 @@ from urllib.parse import urlsplit
 
 
 APP_NAME = "Mykelovve Attire Swapper"
-APP_VERSION = "0.5.3"
+APP_VERSION = "0.5.4"
 _DLL_HANDLES = []
 _PREVIEW_LOCK = threading.Lock()
 _DLL_SEARCH_LOCK = threading.Lock()
@@ -216,6 +216,12 @@ def open_preview_window(url: str) -> None:
             return
     if not webbrowser.open(url):
         raise RuntimeError("No browser could be opened. Install Microsoft Edge or set a default browser.")
+
+
+def check_command(blender: str, job: Path) -> list[str]:
+    return [str(blender), "--background", "--factory-startup", "--disable-autoexec",
+            "--python-exit-code", "1", "--python",
+            str(resource_path("assets/helpers/model_check.py")), "--", str(job)]
 
 
 def blender_command(blender: str, job: Path) -> list[str]:
@@ -471,6 +477,11 @@ class AttireSwapperApp:
         self.base_preview_button = self._button(side, "Preview base", lambda: self._preview_selected("base"))
         self.donor_preview_button = self._button(side, "Preview donor", lambda: self._preview_selected("donor"))
         self.builtin_preview_button = self._button(side, "Included Swerve", self._preview_builtin)
+        self.check_base_button = self._button(side, "Check base", lambda: self._check_model("base"))
+        self.check_donor_button = self._button(side, "Check donor", lambda: self._check_model("donor"))
+        self.check_result_button = self._button(side, "Check result", lambda: self._check_model("result"))
+        self.check_any_button = self._button(side, "Check any model", lambda: self._check_model("any"))
+        self.check_result_button.state(["disabled"])
         self._nav_section(side, "SWAP", (("\ue768", "Create attire swap", self.swap_button, True),
                                         ("\ue8b7", "Output folder", self.output_button, False),
                                         ("\ue90f", "Repair options", self.repair_button, False)))
@@ -478,6 +489,10 @@ class AttireSwapperApp:
                                              ("\ue838", "Preview donor", self.donor_preview_button, False),
                                              ("\ue838", "Preview result", self.result_button, False),
                                              ("\ue734", "Included Swerve", self.builtin_preview_button, False)))
+        self._nav_section(side, "CHECK MODEL", (("\ue73e", "Check base", self.check_base_button, False),
+                                               ("\ue73e", "Check donor", self.check_donor_button, False),
+                                               ("\ue73e", "Check result", self.check_result_button, False),
+                                               ("\ue8e5", "Check any model", self.check_any_button, False)))
         self._nav_section(side, "APP", (("\ue895", "Update app", self.update_button, False),))
         footer = tk.Frame(side, bg=t.SIDE)
         footer.pack(side="bottom", fill="x", padx=24, pady=20)
@@ -702,6 +717,7 @@ class AttireSwapperApp:
             self.donor_combo.configure(state="readonly")
             if not self.last_result:
                 self.result_button.state(["disabled"])
+                self.check_result_button.state(["disabled"])
             if not self.last_output:
                 self.output_button.state(["disabled"])
             self.progress.stop()
@@ -758,6 +774,99 @@ class AttireSwapperApp:
             self.events.put(("log", "3D preview ready (%d reported pose issue%s). Static preview; physics unverified." %
                              (len(problems), "" if len(problems) == 1 else "s")))
         self._thread(work)
+
+    def _choose_any_model(self):
+        """Pick any extracted character folder, then one of its attires."""
+        from tkinter import filedialog, simpledialog
+        selected = filedialog.askdirectory(title="Choose any character or extracted pack to check", parent=self.root)
+        if not selected:
+            return None
+        try:
+            character = resolve_character(selected, require_base=False)
+        except CharacterChoiceRequired as selection:
+            labels = [str(p.relative_to(selection.selected)) for p in selection.candidates]
+            number = simpledialog.askinteger(
+                "Choose a character", "This folder contains several characters. Choose one:\n\n" +
+                "\n".join("%d. %s" % (i + 1, label) for i, label in enumerate(labels)),
+                parent=self.root, minvalue=1, maxvalue=len(labels))
+            if number is None:
+                return None
+            character = selection.candidates[number - 1]
+        attires = attire_choices(character)
+        if not attires:
+            raise ValueError("No attire model was found in " + str(character))
+        attire = attires[0]
+        if len(attires) > 1:
+            number = simpledialog.askinteger(
+                "Choose an attire", "Choose the attire to check:\n\n" +
+                "\n".join("%d. %s" % (i + 1, a) for i, a in enumerate(attires)),
+                parent=self.root, minvalue=1, maxvalue=len(attires))
+            if number is None:
+                return None
+            attire = attires[number - 1]
+        return str(character), attire, None
+
+    def _check_model(self, kind):
+        """Check a base, donor, the last swap, or any model, in Blender."""
+        if self.busy:
+            return
+        blender = self.blender.get().strip()
+        if not blender or not Path(blender).expanduser().is_file():
+            self._error("Blender is needed to check models", "Select Blender 4.3 or 4.4 using Browse.")
+            return
+        try:
+            if kind in ("base", "donor"):
+                character = self._refresh_selection(kind)
+                if character is None:
+                    return
+                target = (str(character), getattr(self, kind + "_attire").get(), None)
+            elif kind == "result":
+                if not self.last_result:
+                    return
+                target = (self.last_result["output_character"], self.last_result["output_attire"],
+                          self.last_result.get("report_path"))
+            else:
+                target = self._choose_any_model()
+                if target is None:
+                    return
+        except (OSError, ValueError) as error:
+            self._error("Choose a model to check", error)
+            return
+        label = {"base": "base", "donor": "donor", "result": "swap result"}.get(kind, Path(target[0]).name)
+        self._set_busy(True, "Checking " + label + " model...")
+        self.progress.configure(mode="indeterminate")
+        self.progress.start(12)
+        self._log("Checking " + label + ": " + target[0] + " / " + target[1])
+        blender_path = str(Path(blender).expanduser())
+        self._thread(lambda: self._run_check(blender_path, target[0], target[1], target[2], label=label))
+
+    def _run_check(self, blender, character, attire, report=None, label="model", auto=False):
+        folder = self.temp / ("check-" + time.strftime("%Y%m%d-%H%M%S") + "-" + secrets.token_hex(2))
+        folder.mkdir()
+        result_path = folder / "result.json"
+        job = folder / "job.json"
+        config = {"character": character, "attire": attire, "addon_dir": str(resource_path("assets/WWE2K_MDL")),
+                  "helpers_dir": str(resource_path("assets/helpers")), "result_path": str(result_path)}
+        if report:
+            config["swap_report"] = report
+        job.write_text(json.dumps(config, indent=2), encoding="utf-8")
+        log_file = folder / "blender.log"
+        with log_file.open("w", encoding="utf-8") as log:
+            process = spawn_blender(check_command(blender, job))
+            for line in process.stdout:
+                log.write(line)
+                if line.startswith("CHECK_PROGRESS "):
+                    try:
+                        self.events.put(("status", "Checking " + label + ": " + json.loads(line[15:])["step"]))
+                    except (ValueError, KeyError):
+                        pass
+            process.wait()
+        if not result_path.is_file():
+            raise RuntimeError("The model check stopped without a result. Details: %s" % log_file)
+        result = json.loads(result_path.read_text(encoding="utf-8"))
+        if not result.get("success"):
+            raise RuntimeError("The model check failed: %s\nDetails: %s" % (result.get("error"), log_file))
+        self.events.put(("check", (label, result, auto)))
 
     def _preview_result(self):
         if self.last_result:
@@ -842,6 +951,13 @@ class AttireSwapperApp:
             if not result.get(key):
                 raise RuntimeError("The swap worker returned an incomplete result: " + key)
         self.events.put(("result", result))
+        # Check every finished swap automatically, so problems are listed at once.
+        try:
+            self.events.put(("status", "Checking the finished swap..."))
+            self._run_check(blender, result["output_character"], result["output_attire"],
+                            result.get("report_path"), label="swap result", auto=True)
+        except Exception as error:
+            self.events.put(("log", "Automatic check could not run: " + str(error)))
 
     def _poll(self):
         try:
@@ -867,6 +983,23 @@ class AttireSwapperApp:
                     for warning in value.get("warnings", []):
                         self._log("Review: " + str(warning))
                     self._log("Open Preview result to inspect Ring, Entrance and the pose controls. Hair and cloth physics remain unverified.")
+                elif kind == "status":
+                    self.status.set(value)
+                elif kind == "check":
+                    label, result, auto = value
+                    marks = {"ok": "OK", "info": "Info", "warn": "Check", "problem": "PROBLEM"}
+                    self._log("-- Check: %s (%s / %s) --" % (label, Path(result["character"]).name, result["attire"]))
+                    for item in result["checks"]:
+                        self._log("%-8s %s" % (marks.get(item["level"], item["level"]), item["text"]))
+                    summary = result.get("summary", {})
+                    text = "%d problem(s), %d thing(s) to check." % (summary.get("problems", 0), summary.get("warnings", 0))
+                    self._log("Check finished: " + text)
+                    if not auto:
+                        from tkinter import messagebox
+                        lines = [item["text"] for item in result["checks"] if item["level"] in ("problem", "warn")]
+                        messagebox.showinfo("Model check: " + label,
+                                            text + ("\n\n" + "\n\n".join(lines[:8]) if lines else "\n\nEverything checked out."),
+                                            parent=self.root)
                 elif kind == "error":
                     self._error(*value)
                 elif kind == "idle":

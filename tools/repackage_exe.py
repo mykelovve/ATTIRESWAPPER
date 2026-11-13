@@ -35,7 +35,13 @@ replacements = {}
 for module in modules:
     source = git_bytes(commit, 'Source/%s.py' % module)
     helper = 'assets\\helpers\\%s.py' % module
-    pkg.get(helper)  # must already exist
+    if helper not in original:
+        # A new helper run only by Blender (for example model_check): add it
+        # next to the other helpers. It is not imported by the app itself.
+        last = max(i for i, e in enumerate(pkg.entries) if e[0].startswith('assets\\helpers\\'))
+        pkg.entries.insert(last + 1, [helper, 1, b'x', zlib.compress(source, 9), len(source)])
+        print('added new helper:', helper)
+        continue
     pkg.replace(helper, source, level=9)
     if module not in pyz.meta:
         raise SystemExit('Module %s is not in PYZ' % module)
@@ -52,13 +58,16 @@ problems = []
 for name, flag, typ, raw, ulen in check.entries:
     if name == 'PYZ.pyz' or name in ('assets\\helpers\\%s.py' % m for m in modules):
         continue
+    if name not in original:
+        problems.append('unexpected new entry: ' + name)
+        continue
     if original[name] != (raw, ulen):
         problems.append('unexpected change: ' + name)
 for module in modules:
     source = git_bytes(commit, 'Source/%s.py' % module)
     if check.content('assets\\helpers\\%s.py' % module) != source:
         problems.append('helper mismatch: ' + module)
-    if pyz2.code(module) != compile(source, module + '.py', 'exec', dont_inherit=True, optimize=0):
+    if module in pyz.meta and pyz2.code(module) != compile(source, module + '.py', 'exec', dont_inherit=True, optimize=0):
         problems.append('PYZ code mismatch: ' + module)
 for name in pyz.order:
     if name not in modules and pyz2.blob(name) != pyz.blob(name):
