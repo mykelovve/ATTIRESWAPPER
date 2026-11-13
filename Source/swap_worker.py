@@ -241,7 +241,18 @@ def _clothing_visibility(obj):
     return (not entrance_only, not ring_only)
 
 
-def _generate_hpl(base, clothing, outward=2.5, inward=4.0, poke=15.0):
+def _view_directions(n, tangent, other):
+    """49 outward view directions: the normal plus three rings at 30, 60 and 85 degrees."""
+    import math
+    yield n
+    for tilt in (math.radians(30), math.radians(60), math.radians(85)):
+        for k in range(16):
+            a = 2 * math.pi * k / 16
+            side = tangent * math.cos(a) + other * math.sin(a)
+            yield (n * math.cos(tilt) + side * math.sin(tilt)).normalized()
+
+
+def _generate_hpl(base, clothing, outward=2.5, inward=4.0, poke=15.0, island_limit=400):
     """Hide base body vertices that the donor clothing covers, per ring/entrance.
 
     A body vertex is covered when the clothing surface lies within ``outward``
@@ -271,8 +282,16 @@ def _generate_hpl(base, clothing, outward=2.5, inward=4.0, poke=15.0):
             obj.data.calc_loop_triangles()
             tris.extend(tuple(offset + i for i in t.vertices) for t in obj.data.loop_triangles)
         trees[name] = BVHTree.FromPolygons(verts, tris, all_triangles=True) if tris else None
+    bodies = [o for o in base['meshes'] if clean_mesh(o.data.name).casefold() in ('m_body', 'm_head')]
+    occ_verts, occ_tris = [], []
+    for obj in bodies:
+        offset = len(occ_verts)
+        occ_verts.extend(obj.matrix_world @ v.co for v in obj.data.vertices)
+        obj.data.calc_loop_triangles()
+        occ_tris.extend(tuple(offset + i for i in t.vertices) for t in obj.data.loop_triangles)
+    occluder = BVHTree.FromPolygons(occ_verts, occ_tris, all_triangles=True)
     result = {}
-    for body in [o for o in base['meshes'] if clean_mesh(o.data.name).casefold() in ('m_body', 'm_head')]:
+    for body in bodies:
         mesh = body.data
         is_body = clean_mesh(mesh.name).casefold() == 'm_body'  # never guess on the face
         normal_matrix = body.matrix_world.to_3x3().inverted().transposed()
@@ -283,24 +302,40 @@ def _generate_hpl(base, clothing, outward=2.5, inward=4.0, poke=15.0):
             a, b = edge.vertices
             neighbors[a].append(b)
             neighbors[b].append(a)
-        counts = {}
+        counts, checks = {}, {}
         for name, tree in trees.items():
             if tree is None:
                 continue
-            covered = set()
+            covered, poked = set(), set()
             for i, (p, n) in enumerate(zip(points, normals)):
                 if n.length < .5:
                     continue
                 hit = tree.ray_cast(p + n * .01, n, outward)[0]
+                if hit is not None:
+                    # Double-check from four angles: a collar or wrap fringe that
+                    # stands off the skin can be seen past, so it does not count.
+                    tangent = n.orthogonal().normalized()
+                    other = n.cross(tangent)
+                    angled = 0
+                    for side in (tangent, -tangent, other, -other):
+                        direction = (n + side).normalized()
+                        if tree.ray_cast(p + n * .01, direction, outward * 2)[0] is not None:
+                            angled += 1
+                    if angled < 3:
+                        hit = None
                 if hit is None:
                     hit = tree.ray_cast(p - n * .01, -n, inward)[0]
+                    if hit is not None:
+                        poked.add(i)
                 if hit is None and is_body:
-                    # Skin that pokes out through deep clothing: the nearest
-                    # clothing surface faces the same way and lies behind it.
+                    # Skin poking out through deep clothing: it must sit straight
+                    # out from a same-facing clothing surface, not past its edge.
                     location, face_normal, _, distance = tree.find_nearest(p, poke)
-                    if (location is not None and face_normal is not None
-                            and face_normal.dot(n) > .3 and (p - location).dot(face_normal) > 0):
-                        hit = location
+                    if location is not None and face_normal is not None and distance > 1e-4:
+                        offset = (p - location) / distance
+                        if face_normal.dot(n) > .5 and offset.dot(face_normal) > .9:
+                            hit = location
+                            poked.add(i)
                 if hit is not None:
                     covered.add(i)
             masked = {i for i in covered if all(j in covered for j in neighbors[i])}
@@ -308,12 +343,63 @@ def _generate_hpl(base, clothing, outward=2.5, inward=4.0, poke=15.0):
             for _ in range(2):
                 masked |= {i for i in range(len(points)) if i not in masked and len(neighbors[i]) >= 3
                            and sum(j in masked for j in neighbors[i]) >= .75 * len(neighbors[i])}
+            # Double-check: find small skin islands fully enclosed by hidden skin.
+            # An island with clothing underneath it (clothing dipping inside the
+            # body) is hidden too. An island with no clothing underneath is a
+            # real opening in the garment (cutout, rip) and stays visible.
+            closed = left = 0
+            if is_body and masked:
+                seen = set(masked)
+                for start in range(len(points)):
+                    if start in seen:
+                        continue
+                    island, todo, enclosed = [], [start], True
+                    seen.add(start)
+                    while todo:
+                        i = todo.pop()
+                        island.append(i)
+                        if len(island) > island_limit:
+                            enclosed = False
+                        for j in neighbors[i]:
+                            if j not in seen:
+                                seen.add(j)
+                                todo.append(j)
+                    if not enclosed or len(island) < 1:
+                        continue
+                    # Clothing within 3 cm of nearly every vertex: a sliver the
+                    # fabric hugs, so hide it. A real opening is wider than that.
+                    under = sum(1 for i in island if tree.find_nearest(points[i], 3.0)[0] is not None)
+                    if under >= .8 * len(island):
+                        masked.update(island)
+                        closed += 1
+                    else:
+                        left += 1
+            # Final double-check: hidden skin that can be seen from outside (some
+            # view direction reaches it without passing clothing or body) would
+            # open a hole, so it stays visible. Skin poking out through fabric is
+            # kept hidden: the fabric right behind it shows instead.
+            unhidden = 0
+            for i in list(masked):
+                if i in poked:
+                    continue
+                p, n = points[i], normals[i]
+                tangent = n.orthogonal().normalized()
+                other = n.cross(tangent)
+                start = p + n * .05
+                for direction in _view_directions(n, tangent, other):
+                    if (tree.ray_cast(start, direction, 60.0)[0] is None
+                            and occluder.ray_cast(start, direction, 60.0)[0] is None):
+                        masked.discard(i)
+                        unhidden += 1
+                        break
             masked = sorted(masked)
             if masked:
                 group = body.vertex_groups.get(name) or body.vertex_groups.new(name=name)
                 group.add(masked, 1.0, 'REPLACE')
             counts[name] = len(masked)
-        result[clean_mesh(mesh.name)] = {'vertices': len(points), 'masked': counts}
+            checks[name] = {'enclosed_spots_hidden': closed, 'openings_left_visible': left,
+                            'visible_points_kept_unhidden': unhidden}
+        result[clean_mesh(mesh.name)] = {'vertices': len(points), 'masked': counts, 'double_check': checks}
     return result
 
 
@@ -326,6 +412,13 @@ def _body_hide_masks(job, base, clothing, donor_counts, warnings):
         result['applied'] = any(sum(v['masked'].values()) for v in result['generated'].values())
         if not result['applied']:
             warnings.append('No body hide-masks (HPL) could be made; skin may show through the clothing.')
+        body_check = (result['generated'].get('M_Body') or {}).get('double_check', {})
+        hidden = max((c['enclosed_spots_hidden'] for c in body_check.values()), default=0)
+        visible = max((c['openings_left_visible'] for c in body_check.values()), default=0)
+        result['double_check_summary'] = {'enclosed_spots_hidden': hidden, 'openings_left_visible': visible}
+        if visible:
+            warnings.append('Mask check: %d small skin area(s) inside the clothing were left visible because the '
+                            'garment has an opening there. Inspect them.' % visible)
     return result
 
 

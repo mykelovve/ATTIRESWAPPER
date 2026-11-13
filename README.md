@@ -31,6 +31,7 @@ Drag to rotate, right-drag to pan, and scroll to zoom. Ring, Entrance, Standing,
 - Bases whose attire rig has no hair bones (for example Carlito-slot ports) no longer stop with "Base attire rig has no J_Hair subtree". Their hair meshes are still kept untouched.
 - A rounding error that could stop a swap with "a fitted vertex exceeded the travel limit" is fixed.
 - Body hide-masks also cover skin that pokes out through clothing sitting deep inside the body, and close pinholes. The face is never masked this way.
+- Every hidden skin point is double-checked from 49 viewing directions. If any direction can see it from outside (collar edges, wrap fringes, garment openings), it stays visible, so masks never open holes. Skin poking out through fabric stays hidden, because the fabric behind it shows instead.
 
 ## v0.5.2 no skin through clothing
 
