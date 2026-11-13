@@ -49,7 +49,7 @@ def check_tk(exe, folder, version):
     try:
         app = gui.AttireSwapperApp(window)
         assert app_updater.version_tuple(gui.APP_VERSION) == app_updater.version_tuple(version)
-        assert app.cancel_button.instate(['disabled'])
+        assert 'disabled' in app.cancel_button.state()
         def settle():
             deadline = time.monotonic() + 10
             while app.update_busy and time.monotonic() < deadline:
@@ -63,7 +63,7 @@ def check_tk(exe, folder, version):
         settle()
         app.task_kind = 'swap'
         app._set_busy(True, 'Windows UI validation')
-        assert not app.cancel_button.instate(['disabled'])
+        assert 'disabled' not in app.cancel_button.state()
         app.update_button.invoke()
         settle()
         assert app.busy
