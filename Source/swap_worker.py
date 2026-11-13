@@ -180,6 +180,63 @@ def _classify_mesh(obj):
     return 'clothing'
 
 
+def _body_counts(meshes):
+    return {clean_mesh(o.data.name).casefold(): len(o.data.vertices) for o in meshes
+            if clean_mesh(o.data.name).casefold() in ('m_body', 'm_head')}
+
+
+def _donor_body_counts(job):
+    """Vertex counts of the donor pack's own body/head, or None without a BaseModel.
+
+    Imported into an empty scene and removed again, so the swap scene never
+    holds two baseModels (the add-on looks bodies up by mesh name).
+    """
+    import bpy
+    from model_layout import one_model
+    folder = next((p for p in job['donor_character'].iterdir()
+                   if p.is_dir() and p.name.casefold() == 'basemodel'), None)
+    if folder is None:
+        return None
+    donor_base = _import_model(one_model(folder, base=True), 'donor_base_model')
+    counts = _body_counts(donor_base['meshes'])
+    for obj in donor_base['objects']:
+        bpy.data.objects.remove(obj, do_unlink=True)
+    for mesh in list(bpy.data.meshes):
+        if mesh.users == 0:
+            bpy.data.meshes.remove(mesh)
+    return counts
+
+
+def _apply_donor_hpl(job, base, donor_counts, warnings):
+    """Hide the base body under the donor clothing with the donor's own HPL masks.
+
+    HPL stores body vertex indices, so the masks are applied only when the
+    donor pack's body and head have the same vertex counts as the base. The
+    groups are added to the scene reference copy; the BaseModel files are still
+    copied byte for byte, and the exporter embeds the masks in the new attire.
+    """
+    from WWE2K_MDL.Serialize.hpl_roundtrip import extract_hpl_from_mcd, apply_hpl_to_basemodel
+    base_counts = _body_counts(base['meshes'])
+    result = {'applied': False, 'base_counts': base_counts, 'donor_counts': donor_counts}
+    if donor_counts is None:
+        result['reason'] = 'The attire donor has no BaseModel to confirm its body matches the base'
+    elif set(base_counts) != {'m_body', 'm_head'} or donor_counts != base_counts:
+        result['reason'] = 'The donor body/head vertex counts differ from the base'
+    else:
+        hpl = extract_hpl_from_mcd(str(job['donor_attire']))
+        if not hpl or len(hpl) <= 32:
+            result['reason'] = 'The donor attire has no body hide-mask (HPL) data'
+        else:
+            ok, message = apply_hpl_to_basemodel(hpl)
+            result.update(applied=bool(ok), message=message, hpl_bytes=len(hpl))
+            if not ok:
+                result['reason'] = message
+    if not result['applied']:
+        warnings.append('Body hide-masks (HPL) were not applied: %s. Skin may show through the '
+                        'clothing; inspect it.' % result['reason'])
+    return result
+
+
 def _copy_attachments(source_collection, bundle):
     import bpy
     source = next((c for c in source_collection.children if c.name.startswith('Model APs')), None)
@@ -591,6 +648,8 @@ def run(config):
         import merge_helpers as mh
         bpy.ops.object.select_all(action='SELECT')
         bpy.ops.object.delete(use_global=False)
+        progress(.05, 'Checking the donor body for hide-masks')
+        donor_body_counts = _donor_body_counts(job)
         progress(.08, 'Importing base body and face')
         base = _import_model(job['base_model'], 'base_model')
         progress(.20, 'Importing preserved hair')
@@ -650,6 +709,7 @@ def run(config):
             for group in list(obj.vertex_groups):
                 if group.name.startswith('HPL_'):
                     obj.vertex_groups.remove(group)
+        report['body_hide_masks'] = _apply_donor_hpl(job, base, donor_body_counts, warnings)
         character = stage / 'Characters' / job['base_character'].name
         attire = character / job['base_attire'].parent.name
         attire.mkdir(parents=True)
