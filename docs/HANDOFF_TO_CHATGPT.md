@@ -23,6 +23,20 @@ The base model's hair stays **exactly** the same: geometry, textures and materia
   - Live: v0.4 and v0.5 both see 0.5.1, and the public download equals the tested EXE.
   - The owner's test swaps are in `Documents/Mykelovve Attire Swaps/*-v051`.
 
+## NEXT TASK (in progress): skin shows through clothing
+Seen in the owner's Swerve swap (base `Downloads\Swerve '25 By JOEMASHUPS\8_Jalen_Brunson - 2K26`, donor Swerve '26 promo): the hair is correct, but blotchy skin patches show through the top, pants and arm.
+- **Cause.** The new attire has no body hide-masks (HPL). The worker imports with `auto_apply_hpl=False`, strips the `HPL_` groups, and the scene has no masks to embed. The game and viewer draw the full body under tight clothes.
+- **Tried (branch `claude/body-hide-masks`, not released).** Apply the donor attire's own HPL (`hpl_roundtrip.extract_hpl_from_mcd` + `apply_hpl_to_basemodel`) when the donor BaseModel's M_Body/M_Head vertex counts equal the base's. It correctly skips both test donors:
+  - Swerve '26 (2) has a different body (7483 vs 12727).
+  - The matching Swerve '26 promo has no HPL at all.
+  - So donor masks alone will not fix this.
+- **Do next.** Generate `HPL_Ring` / `HPL_Entrance` vertex groups on the base M_Body (and M_Head when covered) from donor clothing coverage, in the scene reference copy only:
+  - Mask a body vertex when a ray along its outward normal hits ring-visible donor clothing (not hair, not `S_` cages) within about 2–3 cm.
+  - Use entrance-visible clothing for `HPL_Entrance`; `appearance_flag` 129 means entrance only.
+  - The exporter's HPL round trip (`interface_save.py`: `scene_has_hpl_edits` → `generate_hpl_substream`) embeds the groups automatically.
+  - Keep the BaseModel files byte for byte and the base hair untouched.
+  - Verify in the viewer, which reads hidden skin like the game, then release v0.5.2 with `tools/repackage_exe.py` (base v0.5.1 EXE, previous tag `v0.5.1`).
+
 ## Speedball (Mike Bailey): use the GRANDSLAM base
 - **Which base works.** The owner's working Speedball port, with hair and body fine in game, is `discovery\DISCOVERY CHARACTERS UPDATEDE 2\Characters\1169_Mike_Bailey_GRANDSLAM`.
   - Its `Attire` ships `Attire.ycl` (cages `S_Hair`, `S_Jacket`), `Attire.hpl` and `Attire.mtls`.
