@@ -6,7 +6,7 @@ Windows attire swapping and a textured 3D model viewer for WWE 2K26.
 
 Get the Windows portable ZIP from [Releases](../../releases/latest), extract it, and run the included EXE. Python is included. Viewing models does not require Blender.
 
-Current release: **v0.4 Preview**. Install this ZIP once if you have v0.3 or earlier; those versions cannot install the new updater themselves.
+Current release: **v0.5 Preview**. v0.4 installs it from **Update app**. Install this ZIP once by hand if you have v0.3 or earlier; those versions cannot install updates themselves.
 
 ## Updates
 
@@ -26,7 +26,17 @@ Keep `.mdl` and `.mcd` filenames intact. v0.3 recognizes both formats and valida
 
 Drag to rotate, right-drag to pan, and scroll to zoom. Ring, Entrance, Standing, Arms up, Flex and Open mouth use the original Formatter viewer engine. Base, donor and result previews are available from the sidebar.
 
-## v0.4 preview fixes
+## v0.5 clothing fit
+
+Automatic fitting no longer rejects whole garments. No vertex moves more than the garment's limit (2 cm; 3.7 cm for jackets and tights). Vertices that would need more are tapered or left in place, and the rest of the garment is still repaired. The swap log names any garment that still has geometry inside the body, with its deepest remaining point, so you know what to inspect.
+
+- Mouthguards and other items that sit inside the body by design are recognized and left unchanged.
+- Garments with shape keys are fitted; every key receives the same offset, so key shapes are preserved.
+- The body, head, hair and source files are still never changed.
+
+On the tested Swerve swap, vertices inside the body dropped from 1064 to 134 (pants), 584 to 51 (top) and 44 to 2 (shoes). Some deep penetration can remain; swaps are still drafts to inspect in the viewer and in game. `tests/blender_fit_test.py` checks the fit without game files. See `validation/v0.5.0.json`.
+
+## Retained v0.4 preview fixes
 
 When a renamed character folder breaks stored material paths, the viewer resolves unique local material and color DDS files. This restores body and head images for the tested packs while preserving the source game files. Missing or ambiguous images are reported. Preview shading can still differ from the game.
 
