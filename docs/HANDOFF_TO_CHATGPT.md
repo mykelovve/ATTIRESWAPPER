@@ -23,6 +23,18 @@ The base model's hair stays **exactly** the same: geometry, textures and materia
   - Live: v0.4 and v0.5 both see 0.5.1, and the public download equals the tested EXE.
   - The owner's test swaps are in `Documents/Mykelovve Attire Swaps/*-v051`.
 
+## Speedball (Mike Bailey): use the GRANDSLAM base
+- **Which base works.** The owner's working Speedball port, with hair and body fine in game, is `discovery\DISCOVERY CHARACTERS UPDATEDE 2\Characters\1169_Mike_Bailey_GRANDSLAM`.
+  - Its `Attire` ships `Attire.ycl` (cages `S_Hair`, `S_Jacket`), `Attire.hpl` and `Attire.mtls`.
+  - `discovery\Swervetest\...\1169_Mike_Bailey_United_Empire` has the same `baseModel.mcd` and identical hair meshes, but no `.ycl` or `.hpl`. It looks like an earlier swap output. Do not use it as a base.
+- **Swap run with GRANDSLAM as base** (donor `mike_bailey'26 By ED\Alt_Attire`, v0.5.1 worker, Blender 4.4): succeeded.
+  - Base hair untouched: 4 `.jmtl` files byte-identical, geometry change 0.0.
+  - GRANDSLAM `Attire.ycl` copied unchanged.
+  - Output: `Documents\Mykelovve Attire Swaps\1169_Mike_Bailey_GRANDSLAM_AttireSwap_20261112-215152-v051`.
+- **Open risk.** The copied `.ycl` also holds physics for GRANDSLAM's own `S_Jacket` cage (382 vertices). The donor clothing has its own, different `S_Jacket` (152 vertices). If the jacket glitches in game, the `.ycl` needs only its `S_Hair` section kept, or the donor cage needs its own physics. That needs YCL format work; the add-on has no YCL writer.
+  - The `.ycl` lists cage names (`S_*`), collider joints (`J_*_Col*`) and hair bone chains (`Hair_b..`).
+- **HPL not carried over.** `Attire.hpl` (the body hide-mask) belongs to GRANDSLAM's clothing, so the swap does not copy it.
+
 ## Released (v0.5.0)
 - [v0.5.0](https://github.com/mykelovve/ATTIRESWAPPER/releases/tag/v0.5.0) is the latest stable release.
   - Tag commit: `c43930636878559881ae1e0b293df0c2fdd8a8e9`.
