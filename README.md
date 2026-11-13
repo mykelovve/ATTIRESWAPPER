@@ -48,4 +48,10 @@ Automatic swap results are drafts. Inspect the fit and test in game. Live cloth/
 
 `Source/` contains the application-layer source matching the portable build. Rebuilding also requires the original Formatter runtime and model add-on resources used by the package; those resources are not duplicated in this source tree.
 
+## Release policy
+
+Every Swapper update is published here with its matching `Source/` files, a version tag pointing to that source commit, a downloadable portable ZIP in GitHub Releases, and `SHA256SUMS.txt`. A build is released only after the public download and its complete SHA256 hash are verified. The in-app updater reads the latest stable GitHub Release from this repository.
+
+The manual **Publish portable release** workflow checks the sealed ZIP, its source hashes and the uploaded asset digests before publishing. Its temporary `release-input/<tag>` branch carries the prebuilt package without adding binaries to the main source history, and is removed after download verification. Original model/game assets and personal swap reports are not published in this source tree.
+
 The original Formatter theme and renderer are retained. 3D viewer attribution: **WWE2K_MDL / PWM Mods**. See [third-party notices](THIRD_PARTY_NOTICES.md).
