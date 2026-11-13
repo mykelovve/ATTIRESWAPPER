@@ -157,6 +157,9 @@ def _import_model(path, source):
 def _classify_mesh(obj):
     """Hair shader covers scalp/beard; mixed material meshes need manual work."""
     name = clean_mesh(obj.data.name)
+    # Facial hair counts as hair: M_Combinations is the usual beard mesh name.
+    if re.match(r'^[MS]_(?:Combinations?|Beard|Facial_?Hair|Mo?ustache|Goatee|Sideburns?)(?:$|[_0-9])', name, re.IGNORECASE):
+        return 'hair'
     by_name = bool(re.match(r'^[MS]_Hair(?:$|[_0-9])', name, re.IGNORECASE))
     shaders = []
     for material in obj.data.materials:
