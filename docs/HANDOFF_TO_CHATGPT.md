@@ -1,4 +1,4 @@
-# Handoff from Claude — v0.5.3 released (2026-11-13)
+# Handoff from Claude — v0.5.4 released (2026-11-13)
 
 The owner asked Claude to resume work, fix the clothing auto-fit, fix missing hair, and publish both so the in-app updater delivers them. That is done. This file says what shipped, how it was built and checked, and what is left.
 
@@ -22,6 +22,23 @@ The base model's hair stays **exactly** the same: geometry, textures and materia
   - A real v0.5 → v0.5.1 in-app update passed its health check.
   - Live: v0.4 and v0.5 both see 0.5.1, and the public download equals the tested EXE.
   - The owner's test swaps are in `Documents/Mykelovve Attire Swaps/*-v051`.
+
+## v0.5.4 released: Check model, no donor beards, no stray cages
+- [v0.5.4](https://github.com/mykelovve/ATTIRESWAPPER/releases/tag/v0.5.4) is the latest release.
+  - Tag commit: `88d41a5`.
+  - ZIP SHA-256 `f69c775cc8249c2600bfd658a63fcaa1aca23e71715ee28dd8328148e3450e1d`.
+- **Check model.** New `Source/model_check.py` (run by Blender; bundled as `assets\helpers\model_check.py`, added by `tools/repackage_exe.py`).
+  - GUI sidebar section "CHECK MODEL": Check base, Check donor, Check result, Check any model.
+  - Every finished swap is checked automatically and the results go to the log.
+  - Checks cover: model version; BaseModel body/head; hair and facial-hair meshes; J_Hair; hair `.jmtl` texture links; `.ycl` cages vs the model's `S_` cages; skin showing through the clothing and hide-mask holes per ring/entrance; and, for swap results, base preservation and the excluded donor hair.
+- **Owner's Callum Newman fixes:**
+  - Facial-hair names (`M_Combinations`, Beard, ...) are classified as hair, so a donor's beard is left out.
+  - Donor `S_` cages not driven by the outgoing `.ycl` are dropped; `S_Jacket` had rendered as a black band around the arm.
+  - The donor's own HPL is now pruned for visible points (hand hole).
+  - `_fabric_behind` / `_skin_poking_out` ignore fabric beyond the far side of a limb.
+- **Known:**
+  - The entry script's `--tk-dpi-self-test` still asserts the v0.4 version string after building the UI (same in v0.5.3). Fixing it needs the `gmf_gui` entry source, which is not in `Source/`.
+  - Check reports about 50–150 "skin showing through" points even on untouched original models; tune the thresholds if they prove noisy in game.
 
 ## v0.5.3 released: no-J_Hair bases and mask double-check
 - [v0.5.3](https://github.com/mykelovve/ATTIRESWAPPER/releases/tag/v0.5.3) is the latest release.

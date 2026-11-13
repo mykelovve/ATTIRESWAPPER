@@ -1,0 +1,25 @@
+{
+  "application": "Mykelovve Attire Swapper",
+  "version": "0.5.4",
+  "update_repository": "mykelovve/ATTIRESWAPPER",
+  "changes": [
+    "model_check.py and Check base / donor / result / any-model buttons; finished swaps are checked automatically.",
+    "Facial-hair meshes (M_Combinations, Beard, ...) are classified as hair, so a donor's beard is left out.",
+    "Donor S_ cages not driven by the outgoing .ycl are dropped (they rendered as black meshes).",
+    "All masks (donor HPL included) are pruned of points visible from 49 directions; fabric beyond the far side of a limb no longer counts as behind the skin."
+  ],
+  "environment": "Native Windows 11 (owner's PC), Blender 4.4 and 5.2, Python 3.14",
+  "checks": {
+    "self_test": "success, version 0.5.4.",
+    "ui_construction": "app constructed with the new Check buttons (entry script's stale v0.4 version assertion fails afterwards, as in v0.5.3).",
+    "build_integrity": "repackaged from v0.5.3; model_check.py added as a helper; bundled helpers equal the tested files.",
+    "callum_newman": "Donor beard left out; S_Jacket cage dropped; 0 hide-mask holes by Check result.",
+    "in_app_update_native_windows": "v0.5.3 -> v0.5.4 success."
+  },
+  "limitations": [
+    "Not tested in WWE 2K26 by Claude.",
+    "Generated masks are a rest-pose coverage estimate; a few small specks can remain, and skin at garment edges may show in extreme poses.",
+    "A copied base .ycl also describes the base attire's clothing cages.",
+    "The EXE is not code-signed."
+  ]
+}
