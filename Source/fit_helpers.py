@@ -280,6 +280,9 @@ def fit_clothing_to_body(body, clothing_objects, *, clearance=.1,
                 travel, kind = _allowed_travel(-signed, clearance, max_displacement)
                 if kind == 'fix':
                     fitted[index] = target
+                    # Near body edges the nearest point is not straight along the
+                    # normal, so the real move can exceed the signed depth.
+                    _clamp_travel(fitted, original, index, max_displacement)
                     fixable.append(index)
                     continue
                 frozen.add(index)
@@ -307,7 +310,8 @@ def fit_clothing_to_body(body, clothing_objects, *, clearance=.1,
         moved_indices = [i for i in range(len(fitted))
                          if (fitted[i] - original[i]).length > 1e-7]
         travels = [(fitted[i] - original[i]).length for i in moved_indices]
-        if max(travels, default=0.0) > max_displacement * (1 + 1e-6) + 1e-6:
+        # Blender vectors are 32-bit floats: allow rounding at ~200 cm coordinates.
+        if max(travels, default=0.0) > max_displacement + 1e-3:
             raise RuntimeError('Internal error: a fitted vertex exceeded the travel limit')
         after = _summary(bvh, fitted, penetration_tolerance)
         samples_after = _surface_samples(bvh, constraints, fitted, penetration_tolerance)

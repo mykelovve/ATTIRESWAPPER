@@ -262,7 +262,11 @@ def make_export_bundle(port_armature, clothing_armature, port_hair_meshes,
     arm.hide_set(False)
     arm.hide_viewport = False
     arm.hide_select = False
-    graft = graft_port_hair_subtree(port_armature, arm)
+    if 'J_Hair' in port_armature.data.bones:
+        graft = graft_port_hair_subtree(port_armature, arm)
+    else:
+        # No hair bones on the base: the copied rig is already complete.
+        graft = {'removed_donor_hair_bones': 0, 'copied_port_hair_bones': 0, 'skipped': 'Base rig has no J_Hair'}
     clothing = [_copy_mesh_for_export(obj, collection, arm) for obj in clothing_meshes]
     hair = [_copy_mesh_for_export(obj, collection, arm) for obj in port_hair_meshes]
     bpy.context.view_layer.update()

@@ -241,12 +241,14 @@ def _clothing_visibility(obj):
     return (not entrance_only, not ring_only)
 
 
-def _generate_hpl(base, clothing, outward=2.5, inward=4.0):
+def _generate_hpl(base, clothing, outward=2.5, inward=4.0, poke=15.0):
     """Hide base body vertices that the donor clothing covers, per ring/entrance.
 
     A body vertex is covered when the clothing surface lies within ``outward``
     cm along its outward normal, or within ``inward`` cm behind it (skin that
-    pokes through tight clothing). The mask is eroded by one vertex ring so
+    pokes through tight clothing), or when the nearest clothing surface within
+    ``poke`` cm faces the same way and the vertex lies outside it (skin poking
+    out through clothing that sits deep inside the body). The mask is eroded by one vertex ring so
     garment edges never open holes in the body. Groups go on the scene
     reference copy only; the BaseModel files are still copied byte for byte.
     """
@@ -272,6 +274,7 @@ def _generate_hpl(base, clothing, outward=2.5, inward=4.0):
     result = {}
     for body in [o for o in base['meshes'] if clean_mesh(o.data.name).casefold() in ('m_body', 'm_head')]:
         mesh = body.data
+        is_body = clean_mesh(mesh.name).casefold() == 'm_body'  # never guess on the face
         normal_matrix = body.matrix_world.to_3x3().inverted().transposed()
         points = [body.matrix_world @ v.co for v in mesh.vertices]
         normals = [(normal_matrix @ v.normal).normalized() for v in mesh.vertices]
@@ -291,9 +294,21 @@ def _generate_hpl(base, clothing, outward=2.5, inward=4.0):
                 hit = tree.ray_cast(p + n * .01, n, outward)[0]
                 if hit is None:
                     hit = tree.ray_cast(p - n * .01, -n, inward)[0]
+                if hit is None and is_body:
+                    # Skin that pokes out through deep clothing: the nearest
+                    # clothing surface faces the same way and lies behind it.
+                    location, face_normal, _, distance = tree.find_nearest(p, poke)
+                    if (location is not None and face_normal is not None
+                            and face_normal.dot(n) > .3 and (p - location).dot(face_normal) > 0):
+                        hit = location
                 if hit is not None:
                     covered.add(i)
-            masked = [i for i in covered if all(j in covered for j in neighbors[i])]
+            masked = {i for i in covered if all(j in covered for j in neighbors[i])}
+            # Close pinholes: an unmasked vertex almost surrounded by masked ones.
+            for _ in range(2):
+                masked |= {i for i in range(len(points)) if i not in masked and len(neighbors[i]) >= 3
+                           and sum(j in masked for j in neighbors[i]) >= .75 * len(neighbors[i])}
+            masked = sorted(masked)
             if masked:
                 group = body.vertex_groups.get(name) or body.vertex_groups.new(name=name)
                 group.add(masked, 1.0, 'REPLACE')
@@ -741,8 +756,9 @@ def run(config):
             raise ValueError('No base hair/scalp/beard was confidently identified; choose a supported base attire')
         if not clothing:
             raise ValueError('No donor clothing was identified')
-        if 'J_Hair' not in original_attire['rig'].data.bones:
-            raise ValueError('Base attire rig has no J_Hair subtree; manual rig setup required')
+        # Some characters (short or painted-on hair) have no J_Hair bones. The
+        # export rig is a copy of the base attire rig, so nothing needs grafting.
+        report['base_rig_has_hair_bones'] = 'J_Hair' in original_attire['rig'].data.bones
         report['selection'] = {'base_hair': [o.data.name for o in hair],
                                'donor_clothing': [o.data.name for o in clothing],
                                'excluded_donor_hair': [o.data.name for o in donor['meshes']

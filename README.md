@@ -6,7 +6,7 @@ Windows attire swapping and a textured 3D model viewer for WWE 2K26.
 
 Get the Windows portable ZIP from [Releases](../../releases/latest), extract it, and run the included EXE. Python is included. Viewing models does not require Blender.
 
-Current release: **v0.5.2 Preview**. v0.4 and later install it from **Update app**. Install this ZIP once by hand if you have v0.3 or earlier; those versions cannot install updates themselves.
+Current release: **v0.5.3 Preview**. v0.4 and later install it from **Update app**. Install this ZIP once by hand if you have v0.3 or earlier; those versions cannot install updates themselves.
 
 ## Updates
 
@@ -25,6 +25,12 @@ Keep `.mdl` and `.mcd` filenames intact. v0.3 recognizes both formats and valida
 ## Viewer
 
 Drag to rotate, right-drag to pan, and scroll to zoom. Ring, Entrance, Standing, Arms up, Flex and Open mouth use the original Formatter viewer engine. Base, donor and result previews are available from the sidebar.
+
+## v0.5.3 fixes
+
+- Bases whose attire rig has no hair bones (for example Carlito-slot ports) no longer stop with "Base attire rig has no J_Hair subtree". Their hair meshes are still kept untouched.
+- A rounding error that could stop a swap with "a fitted vertex exceeded the travel limit" is fixed.
+- Body hide-masks also cover skin that pokes out through clothing sitting deep inside the body, and close pinholes. The face is never masked this way.
 
 ## v0.5.2 no skin through clothing
 

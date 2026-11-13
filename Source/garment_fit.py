@@ -163,7 +163,7 @@ def fit_garments(body_parts, garments, *, clearance=.22, max_displacement=2,
                     delta=sum((fitted[i]-original[i] for i in ring),Vector())/len(ring)
                     fitted[center]=original[center]+delta
                 travel=max(((fitted[i]-original[i]).length for i in fitted),default=0)
-                if travel>max_displacement*(1+1e-6)+1e-6:raise FitLimitError('Cap transfer exceeds displacement limit',result)
+                if travel>max_displacement+1e-3:raise FitLimitError('Cap transfer exceeds displacement limit',result)
                 result.update({'source_object':obj.name,'source_mesh':obj.data.name,
                     'excluded_internal_cap_centers':sorted(centers),'cap_detection_evidence':evidence,
                     'max_complete_mesh_travel_cm':travel,
