@@ -666,8 +666,6 @@ def _copy_attachments(source_collection, bundle):
         new.data = old.data.copy() if old.data else None
         collection.objects.link(new)
         copies[old] = new
-    if skipped:
-        raise ValueError('Donor attachments use missing base bones: %r' % skipped)
     for old, new in copies.items():
         if old.parent in copies:
             new.parent = copies[old.parent]
@@ -1102,6 +1100,14 @@ def run(config):
             raise ValueError('Expected exactly one base M_Head for the combined garment collider')
         _fit([bodies[0], heads[0]], bundle, job['fit_clothing'], report, warnings)
         attachments, report['attachments'] = _copy_attachments(donor['collection'], bundle)
+        skipped = report['attachments']['skipped_missing_bones']
+        if skipped:
+            # Usually attachment points on the donor's own hair bones; the swap
+            # keeps the base hair, so they are left out rather than rebound.
+            warnings.append("Left out %d donor attachment point(s) tied to bones the base does not have (%s), "
+                            "usually the donor's own hair: %s." % (
+                                len(skipped), ', '.join(sorted({b for s in skipped for b in s['bones']})),
+                                ', '.join(re.sub(r'[.][0-9]+$', '', s['attachment']) for s in skipped)))
         keep = set(bundle['meshes'] + [bundle['armature']] + base['objects'] + attachments)
         for obj in list(bpy.data.objects):
             if obj not in keep:
