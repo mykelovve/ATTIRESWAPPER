@@ -2,6 +2,16 @@
 
 The owner asked Claude to resume work, fix the clothing auto-fit, fix missing hair, and publish both so the in-app updater delivers them. That is done. This file says what shipped, how it was built and checked, and what is left.
 
+## IMPORTANT (2026-11-14): v0.5.7 pulled back; v0.5.6 is the latest release
+- **v0.5.7 is a pre-release on purpose.** It was published, then found to hide too little skin: large skin patches show through the singlet on the owner's JC Mateo (`1300_Rosey`) + Jeff Cobb swap. It was marked pre-release so **Update app offers v0.5.6** (verified for v0.4 and v0.5.5 clients).
+- **`main` still holds the v0.5.7 source** (tag `v0.5.7`). Its mask pruning (`_prune_visible_masks`: "opaque fabric must lie directly behind along every visible view line") un-hides about 880 body points that should stay hidden. A grazing-angle tweak (start inside the skin, ignore hits within 3 mm) did not change that. Suspect the fabric BVH (Codex's opaque-eligible triangles only) or the far-flesh comparison.
+  - **Next v0.5.8:** either revert `_prune_visible_masks` to v0.5.6 behaviour and keep only the poke-through addition, or fix the prune.
+  - **Measure before releasing.** Read the masks from the viewer payload: `--build-preview`, then compare `idx['all']` with `idx['0']['tris']` for M_Body. Count both hidden faces with no clothing within 4 cm (holes) and visible skin in front of fabric (poke-through).
+- **Open, owner-reported:**
+  - **Hair:** in the v0.5.6-app swap (`1300_Rosey_AttireSwap_20261114-094055-5573`), JC Mateo's long hair looked missing in the viewer, although the hair `.jmtl`, textures, `.ycl` and rest geometry are byte-identical to the base. In later swaps the hair shows. Cause not found.
+  - **Kneepad size:** the donor kneepad floats far off a thinner base leg. The fit only pushes clothing out; a bounded "shrink to fit" for loose gear is a new feature.
+
+
 ## v0.5.6 released (Claude): v0.5.5 plus the donor-attachment fix
 - [v0.5.6](https://github.com/mykelovve/ATTIRESWAPPER/releases/tag/v0.5.6) is the latest release.
   - Built from Codex's published v0.5.5 EXE with `tools/repackage_exe.py` (previous tag `v0.5.5`).
