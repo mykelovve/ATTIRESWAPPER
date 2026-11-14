@@ -1,0 +1,22 @@
+{
+  "application": "Mykelovve Attire Swapper",
+  "version": "0.5.6",
+  "base_release": "v0.5.5 (Codex) portable EXE, downloaded and SHA256-verified through the in-app updater",
+  "changes": [
+    "Donor attachment points whose ARMATURE constraints need bones missing from the base rig are left out with a log warning instead of aborting the swap."
+  ],
+  "environment": "Native Windows 11, Blender 4.4.3, Python 3.14",
+  "checks": {
+    "self_test": "success, version 0.5.6",
+    "build_integrity": "repackaged from the v0.5.5 EXE; only attire_swapper_gui and swap_worker replaced; every bundled helper equals the release source",
+    "hpl_tests": "28/28",
+    "gui_workflow_tests": "18 OK (1 skipped)",
+    "fit_test": "12/12",
+    "rosey_jeff_cobb": "previously aborted on Hair_b04_06 attachment points; completes, 5 points left out, base hair untouched",
+    "in_app_update_native_windows": "v0.5.5 -> v0.5.6 success"
+  },
+  "limitations": [
+    "Not tested in WWE 2K26 by Claude.",
+    "The EXE is not code-signed."
+  ]
+}

@@ -2,6 +2,19 @@
 
 The owner asked Claude to resume work, fix the clothing auto-fit, fix missing hair, and publish both so the in-app updater delivers them. That is done. This file says what shipped, how it was built and checked, and what is left.
 
+## v0.5.6 released (Claude): v0.5.5 plus the donor-attachment fix
+- [v0.5.6](https://github.com/mykelovve/ATTIRESWAPPER/releases/tag/v0.5.6) is the latest release.
+  - Built from Codex's published v0.5.5 EXE with `tools/repackage_exe.py` (previous tag `v0.5.5`).
+  - ZIP SHA-256 `6052a73505848c7462248f7e4a75d9f559ea56ef0dae382d2a3747b87f00a4e2`.
+- **Coordination note.** Claude and Codex both produced a "v0.5.5". Codex's was published first and is kept. Claude's unpublished v0.5.5 commits are not on GitHub; this release re-applies only the attachment fix on top of Codex's main.
+- **Fix.** `_copy_attachments` no longer raises "Donor attachments use missing base bones". Donor `ap_*` points constrained to bones the base lacks (usually the donor's own hair bones, e.g. `Hair_b04_06` on Jeff Cobb `1188_Jeff_Cobb_Gold`) are left out with a log warning; nothing is rebound.
+- **Checked.**
+  - The Windows release gate passed in CI.
+  - Locally: self-test 0.5.6; `blender_hpl_test` 28/28; `test_gui_workflow` 18 OK (1 skipped); fit test 12/12; real v0.5.5 → v0.5.6 in-app update.
+  - The JC Mateo (`1300_Rosey`) + Jeff Cobb swap completes with the base hair untouched.
+- **Note.** On that swap, Claude's `model_check.py` flags about 500 "skin showing through" points with Codex's more conservative masks (106 with Claude's earlier masks). The two mask philosophies should be reconciled after the owner checks in game.
+
+
 ## v0.5.5 released
 [Download v0.5.5](https://github.com/mykelovve/ATTIRESWAPPER/releases/tag/v0.5.5). The complete public ZIP SHA256 is `08ae926bc04fc420448cbe5d425a8459e411d76687e26225c64a3d0dea01af91`. Matching source/tag: `b1fba8555d073eb10e95de05e88d9a85eb8d6a97`. Native Windows runtime, original-theme Tk controls and workflow tests passed in run43458859010. The public ZIP and server digest were verified.
 
