@@ -6,7 +6,7 @@ Windows attire swapping and a textured 3D model viewer for WWE 2K26.
 
 Get the Windows portable ZIP from [Releases](../../releases/latest), extract it, and run the included EXE. Python is included. Viewing models does not require Blender.
 
-Current release: **v0.5.5 Preview**. v0.4 and later install it from **Update app**. Install this ZIP once by hand if you have v0.3 or earlier; those versions cannot install updates themselves.
+Current release: **v0.5.6 Preview**. v0.4 and later install it from **Update app**. Install this ZIP once by hand if you have v0.3 or earlier; those versions cannot install updates themselves.
 
 ## Updates
 
@@ -25,6 +25,10 @@ Keep `.mdl` and `.mcd` filenames intact. v0.3 recognizes both formats and valida
 ## Viewer
 
 Drag to rotate, right-drag to pan, and scroll to zoom. Ring, Entrance, Standing, Arms up, Flex and Open mouth use the original Formatter viewer engine. Base, donor and result previews are available from the sidebar.
+
+## v0.5.6 donor attachments on missing bones
+
+- A swap no longer stops with "Donor attachments use missing base bones". Donor attachment points tied to bones the base does not have (usually the donor's own hair, for example `Hair_b04_06`) are left out and listed in the log; nothing is rebound to another bone. Everything in v0.5.5 is unchanged.
 
 ## v0.5.5 mask edges and swap controls
 
