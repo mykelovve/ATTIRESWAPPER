@@ -369,7 +369,7 @@ def _mask_material_reason(material, image_cache):
 
 
 def _generate_hpl(base, clothing, outward=2.5, inward=4.0, poke=15.0, *,
-                  interior_meshes=(), diagnostics=None, _trees_out=None):
+                  interior_meshes=(), diagnostics=None, _trees_out=None, poke_deep=25.0):
     """Hide base body vertices that the donor clothing covers, per ring/entrance.
 
     A body vertex is covered when the clothing surface lies within ``outward``
@@ -500,11 +500,22 @@ def _generate_hpl(base, clothing, outward=2.5, inward=4.0, poke=15.0, *,
             masked = [i for i in covered if neighbors[i] and incident[i]
                       and all(j in covered for j in neighbors[i])
                       and all(face_covered[j] for j in incident[i])]
+            if is_body:
+                # Body skin poking OUT through opaque fabric (fabric sits inside
+                # the body behind it) is hidden too: the fabric shows instead.
+                # The strict face test above only accepts fabric over the skin.
+                poked = [i for i, (p, n) in enumerate(zip(points, normals))
+                         if n.length >= .5 and _skin_poking_out(tree, occluder, p, n.normalized(), poke_deep)]
+                masked = sorted(set(masked) | set(poked))
+                face_checks_poked = len(poked)
+            else:
+                face_checks_poked = 0
             if masked:
                 group = body.vertex_groups.get(name) or body.vertex_groups.new(name=name)
                 group.add(masked, 1.0, 'REPLACE')
             counts[name] = len(masked)
             face_checks[name] = {'vertex_hits': len(covered),
+                                 'skin_poking_through_hidden': face_checks_poked,
                                  'sampled_triangles_covered': sum(face_covered),
                                  'triangles': len(triangles)}
         result[clean_mesh(mesh.name)] = {'vertices': len(points), 'masked': counts,
@@ -550,14 +561,20 @@ def _prune_visible_masks(base, clothing, *, _coverage_trees=None):
                 n = (normal_matrix @ vertex.normal).normalized()
                 if n.length < .5:
                     continue
-                if cloth is not None and _skin_poking_out(cloth, occluder, p, n):
-                    continue
                 tangent = n.orthogonal().normalized()
                 other = n.cross(tangent)
                 start = p + n * .05
                 for direction in _view_directions(n, tangent, other):
-                    if ((cloth is None or cloth.ray_cast(start, direction, 60.0)[0] is None)
-                            and (occluder is None or occluder.ray_cast(start, direction, 60.0)[0] is None)):
+                    if ((cloth is not None and cloth.ray_cast(start, direction, 60.0)[0] is not None)
+                            or (occluder is not None and occluder.ray_cast(start, direction, 60.0)[0] is not None)):
+                        continue  # nobody can see this point from here
+                    # Seen from this direction. Hiding the skin is safe only if
+                    # opaque fabric lies directly behind it along the view line,
+                    # nearer than any other body surface; otherwise it is a hole.
+                    behind = p - direction * .05
+                    fabric = cloth.ray_cast(behind, -direction, 60.0) if cloth is not None else (None, None, None, None)
+                    flesh = occluder.ray_cast(behind, -direction, 60.0) if occluder is not None else (None, None, None, None)
+                    if fabric[0] is None or (flesh[0] is not None and flesh[3] < fabric[3]):
                         drop.append(i)
                         break
             if drop:

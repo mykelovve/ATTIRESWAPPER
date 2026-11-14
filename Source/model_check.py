@@ -224,25 +224,30 @@ def _check_body(sw, attire, base, clothing, add):
         for i, (p, n) in enumerate(zip(points, normals)):
             if n.length < .5:
                 continue
-            # Same rule as the swap: fabric just behind the skin, inside the body.
-            behind = sw._skin_poking_out(tree, occluder, p, n)
             if i not in masked:
-                if behind:
-                    through.append(p)
-                continue
-            if behind:
+                # Visible skin with opaque fabric right behind it (within 4 cm,
+                # before any other body surface) is skin poking through.
+                if sw._fabric_behind(tree, occluder, p, n, 4.0):
+                    tangent = n.orthogonal().normalized()
+                    if tree.ray_cast(p + n * .05, n, 60.0)[0] is None and occluder.ray_cast(p + n * .05, n, 60.0)[0] is None:
+                        through.append(p)
                 continue
             tangent = n.orthogonal().normalized()
             other = n.cross(tangent)
             start = p + n * .05
             for direction in sw._view_directions(n, tangent, other):
-                if tree.ray_cast(start, direction, 60.0)[0] is None and occluder.ray_cast(start, direction, 60.0)[0] is None:
+                if tree.ray_cast(start, direction, 60.0)[0] is not None or occluder.ray_cast(start, direction, 60.0)[0] is not None:
+                    continue
+                back = p - direction * .05
+                fabric = tree.ray_cast(back, -direction, 60.0)
+                flesh = occluder.ray_cast(back, -direction, 60.0)
+                if fabric[0] is None or (flesh[0] is not None and flesh[3] < fabric[3]):
                     holes.append(p)
                     break
         label = 'ring gear' if mode == 'Ring' else 'entrance gear'
         if through:
-            level = 'problem' if len(through) > 150 else 'warn'
-            add(level, 'Skin showing through the %s at %d point(s): %s.' % (label, len(through), _regions(through)))
+            add('warn', 'Skin may show through the %s at %d point(s): %s. Untouched models often list some too; '
+                'compare in the 3D viewer.' % (label, len(through), _regions(through)))
         else:
             add('ok', 'No skin showing through the %s.' % label)
         if holes:
