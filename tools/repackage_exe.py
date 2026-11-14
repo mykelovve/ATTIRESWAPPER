@@ -44,7 +44,7 @@ for module in modules:
         continue
     pkg.replace(helper, source, level=9)
     if module not in pyz.meta:
-        raise SystemExit('Module %s is not in PYZ' % module)
+        continue  # a Blender-only helper (e.g. model_check): not imported by the app
     code = compile(source, module + '.py', 'exec', dont_inherit=True, optimize=0)
     replacements[module] = zlib.compress(marshal.dumps(code), 9)
 pkg.replace('PYZ.pyz', pyz.build(replacements), level=9)
